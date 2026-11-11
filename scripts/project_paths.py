@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,6 +38,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default=None,
                         help="Project directory (default: cwd)")
+    parser.add_argument("--days", type=float, default=None,
+                        help="Only list session files modified in the last N days")
     args = parser.parse_args()
 
     project = args.project or os.getcwd()
@@ -46,16 +49,24 @@ def main() -> int:
     sessions = []
     subagents = []
     if session_dir.is_dir():
-        newest_first = sorted(
-            (str(p) for p in session_dir.glob("*.jsonl")),
-            key=lambda p: os.path.getmtime(p),
-            reverse=True,
-        )
+        cutoff = time.time() - args.days * 86400 if args.days is not None else None
+
+        def newest_first(paths):
+            paths = [str(p) for p in paths]
+            if cutoff is not None:
+                paths = [p for p in paths if os.path.getmtime(p) >= cutoff]
+            return sorted(paths, key=os.path.getmtime, reverse=True)
+
         # agent-*.jsonl are subagent conversations: their "user" turns are
         # prompts Claude wrote, not the user. Listed apart so callers mine
         # them only for tool rejections, which do come from the user.
-        for path in newest_first:
+        # Current Claude Code writes them to <session-uuid>/subagents/;
+        # older versions put them next to the session files.
+        for path in newest_first(session_dir.glob("*.jsonl")):
             (subagents if os.path.basename(path).startswith("agent-") else sessions).append(path)
+        subagents = newest_first(
+            subagents + [str(p) for p in session_dir.glob("*/subagents/agent-*.jsonl")]
+        )
 
     print(json.dumps({
         "project_dir": str(project),
