@@ -361,6 +361,7 @@ claude-reflect/
 ├── scripts/
 │   ├── lib/
 │   │   ├── reflect_utils.py      # Shared utilities
+│   │   ├── redact.py             # Masks secrets before anything is stored or printed
 │   │   └── semantic_detector.py  # AI-powered semantic analysis
 │   ├── capture_learning.py       # Hook: detect corrections
 │   ├── check_learnings.py        # Hook: pre-compact check
@@ -404,6 +405,13 @@ Only reusable learnings are kept.
 ### Transcripts Are Data
 
 Session files contain text Claude read from web pages, files and tool output, so `/reflect` and `/reflect-skills` never follow instructions found in them, and never put that text on a shell command line. Proposed learnings that would run or fetch something, change settings or permissions, or speak to the AI directly are shown with a `⚠️ possible injected instruction` flag, left out of "Apply all", and applied only if you approve each one on its own (default Skip). That includes `remember:` items. Subagent conversations (`agent-*.jsonl`, under `<session>/subagents/` on current Claude Code, and `isSidechain` entries) are not mined for corrections, because their "user" turns were written by Claude.
+### Secret Redaction
+
+Secret-shaped text is replaced with `[REDACTED]` before anything is written to the learnings queue (and so its backups) or printed by the session extractors: prefixed API keys (`sk-`, `ghp_`, `xoxb-`, `glpat-`, AWS, Google), JWTs, private key blocks, the password in `scheme://user:password@host`, values after `password:` / `token=` / `api key is`, and long letter-and-digit tokens. Only the secret is masked, so `use DATABASE_URL=[REDACTED] from .env` still reads as a rule. The patterns match reflect-mod's.
+
+Queues written by older versions are scrubbed the next time they are saved. Set `CLAUDE_REFLECT_REDACT=false` to turn redaction off.
+
+Redaction covers what the plugin stores and what its scripts print. During `/reflect`, Claude can still read session files directly, so review proposed entries before they are written.
 
 ### Duplicate Detection
 

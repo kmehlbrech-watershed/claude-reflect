@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `project_paths.py --days N` filters both file lists by modification time.
 - 14 tests in `tests/test_transcripts_as_data.py`.
 
+- **Secret redaction in the Python plugin** (`scripts/lib/redact.py`). Secret-shaped text is replaced with `[REDACTED]` in queue items (`create_queue_item`, and every `save_queue_at`, which also scrubs queues written by older versions), in the messages and rejections the session extractors return, and in tool-error samples (redacted before truncation). The patterns match reflect-mod's `SECRET` list, plus passwords in `scheme://user:password@host`; only the secret is masked, so the learning stays readable. Opt out with `CLAUDE_REFLECT_REDACT=false`.
+- The capture hook's confirmation line prints the redacted text.
+- 14 tests in `tests/test_redact.py`.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs

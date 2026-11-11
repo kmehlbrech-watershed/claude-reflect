@@ -13,6 +13,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
 
+from .redact import redact_secrets
+
 # =============================================================================
 # Hook I/O encoding
 # =============================================================================
@@ -157,6 +159,13 @@ def _write_private_text(path: Path, text: str) -> None:
     make_private(path)
 
 
+def _redact_queue_item(item: Any) -> Any:
+    """Copy of a queue item with its message redacted; other shapes pass through."""
+    if isinstance(item, dict) and isinstance(item.get("message"), str):
+        return {**item, "message": redact_secrets(item["message"])}
+    return item
+
+
 def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     """Write a queue to an explicit path, atomically.
 
@@ -164,7 +173,11 @@ def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     between truncate and write sees an empty or half-written file -- which
     the loaders treat as "no learnings" and the migration used to treat as
     "safe to delete".
+
+    Messages are redacted on the way out, so queues written before redaction
+    existed are scrubbed the next time they are saved.
     """
+    items = [_redact_queue_item(item) for item in items]
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
@@ -1653,10 +1666,10 @@ def create_queue_item(
     decay_days: int,
     project: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Create a properly formatted queue item."""
+    """Create a properly formatted queue item. The message is redacted."""
     return {
         "type": item_type,
-        "message": message,
+        "message": redact_secrets(message),
         "timestamp": iso_timestamp(),
         "project": project or os.getcwd(),
         "patterns": patterns,
@@ -1715,7 +1728,7 @@ def extract_user_messages(session_file: Path, corrections_only: bool = False) ->
                 # Handle string content directly
                 if isinstance(content, str):
                     if content and _should_include_message(content):
-                        messages.append(content)
+                        messages.append(redact_secrets(content))
                 # Handle list of content items
                 elif isinstance(content, list):
                     for item in content:
@@ -1724,7 +1737,7 @@ def extract_user_messages(session_file: Path, corrections_only: bool = False) ->
                             if text:
                                 # Apply filters (same as bash script)
                                 if _should_include_message(text):
-                                    messages.append(text)
+                                    messages.append(redact_secrets(text))
     except IOError:
         return []
 
@@ -1853,7 +1866,7 @@ def extract_tool_rejections(session_file: Path) -> List[str]:
                         # Get the next line (bash uses getline)
                         lines = after_marker.strip().split("\n")
                         if lines and lines[0].strip():
-                            rejections.append(lines[0].strip())
+                            rejections.append(redact_secrets(lines[0].strip()))
 
     except IOError:
         return []
@@ -1999,7 +2012,9 @@ def extract_tool_errors(
 
                     errors.append({
                         "error_type": error_type,
-                        "content": tool_content[:500],  # Truncate long errors
+                        # Redact before truncating: a cut can shorten a token
+                        # below the length the patterns recognise.
+                        "content": redact_secrets(tool_content)[:500],
                         "project": str(session_file.parent.name),
                         "timestamp": entry.get("timestamp", ""),
                         "suggested_guideline": suggested_guideline,
