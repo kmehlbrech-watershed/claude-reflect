@@ -144,6 +144,8 @@ Hooks run automatically to detect and queue corrections:
 | `check_learnings.py` | Before compaction | Backs up queue and informs user |
 | `post_commit_reminder.py` | After git commit | Reminds to run /reflect after completing work |
 
+The queue (`~/.claude/projects/<project>/learnings-queue.json`) and its backups (`~/.claude/learnings-backups/<project>/`) hold your prompts verbatim, so on macOS and Linux they are created owner-only (`0600`, directories `0700`). Windows has no equivalent of these modes, so there the files get your profile folder's usual permissions. Each project keeps only its newest 20 backups; set `CLAUDE_REFLECT_MAX_BACKUPS` to change that (`0` keeps all). Backups written by earlier versions sit directly in `~/.claude/learnings-backups/` and are never pruned or changed; delete them yourself once you no longer need them.
+
 **Stage 2: Process (Manual)**
 
 Run `/reflect` to review and apply queued learnings to CLAUDE.md.
@@ -440,10 +442,11 @@ After:
 
 6. **Skills get smarter** - When you correct Claude during a skill, that correction can be routed back to the skill file itself via `/reflect`
 
-7. **Extend session retention** - Claude Code deletes local sessions after 30 days by default. Since claude-reflect relies on session history for `/reflect --scan-history` and `/reflect-skills`, extend this in `~/.claude/settings.json`:
+7. **Extend session retention** - Claude Code deletes local sessions after 30 days by default. Since claude-reflect relies on session history for `/reflect --scan-history` and `/reflect-skills`, you can extend this in `~/.claude/settings.json`:
    ```json
-   { "cleanupPeriodDays": 99999 }
+   { "cleanupPeriodDays": 90 }
    ```
+   Pick the shortest window that covers how far back you want to reflect. Transcripts hold everything you and Claude typed and read, including secrets and customer data, so check your organization's data-retention policy before keeping them longer.
 
 ## Contributing
 

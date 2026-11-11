@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sturdier reply parsing.** JSON in the reply is found with a real decoder at each `{` (fenced blocks first), so braces inside string values, braces in surrounding prose and an echoed example object no longer break it; each call site asks for the object that has its own key (`is_learning`, `is_learnable`, `contradictions`). An error envelope with no `result` (e.g. `error_max_turns`) and a tool-error reply without `is_learnable` now count as no answer instead of a "no". `--verbose` / stream-json output is not supported and gives no answer.
 - The semantic analysis prompt's own text no longer contains the literal `remember:` marker (it describes it instead), with the same classification guidance. The message being analyzed can still contain it, so keeping nested `claude -p` prompts out of the capture hook is handled separately.
 
+- **Owner-only queue and backups.** `save_queue_at` writes `0600` files, and the PreCompact hook makes `~/.claude/learnings-backups/` `0700` and writes each backup through `save_queue_at` (atomic, owner-only) instead of copying the queue file. No-op where chmod is unsupported.
+- **Backups are pruned.** Only the newest 20 `pre-compact-*.json` files are kept; `CLAUDE_REFLECT_MAX_BACKUPS` changes the count, `0` keeps all. They used to accumulate forever.
+
+- **Owner-only queue and backups.** `save_queue_at` creates its temp file with `os.open(..., 0o600)`, so the prompts are never readable by other users, not even between write and rename (a chmod after `write_text` left a window at umask `0644`). Every queue write goes through it now: the legacy global-queue migration and the empty queue `capture_learning.py` creates used plain `write_text`. Backup directories are created `0700`. File modes are POSIX-only: on Windows chmod and the `os.open` mode are no-ops and the files get the profile folder's usual permissions.
+- **Backups are per project and pruned.** The PreCompact hook writes `~/.claude/learnings-backups/<project folder>/pre-compact-<timestamp>-<pid>.json` (the pid stops two compactions in one second overwriting each other) through `save_queue_at` instead of copying the queue file, then keeps the newest 20 in that project's folder; `CLAUDE_REFLECT_MAX_BACKUPS` changes the count, `0` keeps all. Pruning only considers names in exactly that format, so a hand-made `pre-compact-manual.json` is neither deleted nor mistaken for the newest, and never touches another project's backups. Backups written by earlier versions directly in `learnings-backups/` are left as they are; delete them by hand.
+- **Retention advice no longer suggests `cleanupPeriodDays: 99999`.** The SessionStart warning and README suggest 90 days and point to the user's data-retention policy, since transcripts can hold secrets and customer data.
+
+### Fixed
+- **PreCompact backs up the right queue.** `check_learnings.py` now reads the hook payload's `transcript_path`, as `capture_learning.py` does, instead of deriving the project from the working directory, which could name another project's queue. It falls back to the working directory when the field is absent.
+
+### Tests
+- 17 tests in `tests/test_private_storage.py`. They point both `HOME` and `USERPROFILE` at a temporary directory (Windows' `Path.home()` reads `USERPROFILE`), so a run can never write to or prune the real `~/.claude`.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs
