@@ -6,6 +6,7 @@ and determine if they contain reusable learnings.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import Optional, Dict, Any, List
@@ -19,38 +20,92 @@ DEFAULT_TIMEOUT = 30
 NESTED_ENV_VAR = "CLAUDE_REFLECT_NESTED"
 
 # The nested calls only classify text that is already in the prompt, and that
-# text comes from transcripts (untrusted). They need no tools and no MCP
-# servers, so they get none: no file access, no shell, no web.
-HARDENING_FLAGS = ["--tools", "", "--strict-mcp-config"]
+# text comes from transcripts (untrusted). They need no tools, no MCP servers,
+# none of the user's customizations, and no saved session, so they get none:
+#   --tools ""                  no built-in tools (no shell, files or web)
+#   --strict-mcp-config         no MCP servers (none are passed via --mcp-config)
+#   --safe-mode                 no CLAUDE.md, auto-memory, plugins, hooks, skills,
+#                               custom agents; login and model selection still work
+#   --no-session-persistence    no transcript under ~/.claude/projects/, which
+#                               /reflect --scan-history would otherwise mine
+# Each entry is one flag with its argv. `--tools` and `""` stay separate argv
+# elements so the empty string survives as its own argument.
+HARDENING_FLAGS = [
+    ("--tools", ["--tools", ""]),
+    ("--strict-mcp-config", ["--strict-mcp-config"]),
+    ("--safe-mode", ["--safe-mode"]),
+    ("--no-session-persistence", ["--no-session-persistence"]),
+]
 
-# Flipped off for the rest of the process if the installed claude is too old
-# to know HARDENING_FLAGS, so it is probed once rather than on every call.
-_hardening_supported = True
+# Claude Code older than `--tools` still has `--disallowedTools`, so on those
+# versions the built-in tools are denied by name instead. Names a version does
+# not have are ignored by the CLI.
+BUILTIN_TOOLS = [
+    "Bash", "BashOutput", "KillShell", "KillBash", "PowerShell", "Monitor",
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "NotebookRead",
+    "Glob", "Grep", "LS", "WebFetch", "WebSearch",
+    "Task", "Agent", "TaskOutput", "TaskStop", "SendMessage", "ListAgents",
+    "TodoWrite", "TodoRead", "ExitPlanMode", "EnterPlanMode",
+    "SlashCommand", "Skill", "ToolSearch", "AskUserQuestion",
+    "ListMcpResourcesTool", "ReadMcpResourceTool",
+    "EnterWorktree", "ExitWorktree", "Workflow",
+    "CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger",
+    "PushNotification", "PublishPlugin", "DesignSync", "ReportFindings",
+    "ShareOnboardingGuide",
+]
+DISALLOWED_TOOLS_FLAG = "--disallowedTools"
+
+# Flags the installed claude rejected, remembered for the rest of the process
+# so each one is probed once rather than on every call.
+_rejected_flags: set = set()
 
 
-def _claude_command(model: Optional[str], hardened: bool) -> List[str]:
+def _claude_command(model: Optional[str], rejected=frozenset()) -> List[str]:
+    """The `claude -p` argv, with every hardening flag not in `rejected`."""
     cmd = ["claude", "-p", "--output-format", "json"]
-    if hardened:
-        cmd.extend(HARDENING_FLAGS)
+    for flag, argv in HARDENING_FLAGS:
+        if flag not in rejected:
+            cmd.extend(argv)
+        elif flag == "--tools" and DISALLOWED_TOOLS_FLAG not in rejected:
+            cmd.extend([DISALLOWED_TOOLS_FLAG, ",".join(BUILTIN_TOOLS)])
     if model:
         cmd.extend(["--model", model])
     return cmd
 
 
+def _flags_in(cmd: List[str]) -> List[str]:
+    hardening = {flag for flag, _ in HARDENING_FLAGS} | {DISALLOWED_TOOLS_FLAG}
+    return [arg for arg in cmd if arg in hardening]
+
+
+def _named_flag(stderr: str, flags: List[str]) -> Optional[str]:
+    """The first of `flags` that the CLI's error output names, if any."""
+    for flag in flags:
+        if re.search(r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])", stderr, re.IGNORECASE):
+            return flag
+    return None
+
+
+def _warn(message: str) -> None:
+    print(f"claude-reflect: {message}", file=sys.stderr)
+
+
 def _run_claude(prompt: str, model: Optional[str], timeout: int) -> subprocess.CompletedProcess:
-    """Run one nested `claude -p` call with no tools, no MCP, and hooks muted.
+    """Run one nested `claude -p` call, hardened (see HARDENING_FLAGS), hooks muted.
 
     Raises what subprocess.run raises (FileNotFoundError, TimeoutExpired);
-    callers already handle those. If the CLI rejects the hardening flags as
-    unknown (Claude Code older than --tools), retries once without them so
-    semantic detection keeps working, and remembers that for later calls.
+    callers already handle those. If the call fails and the CLI's error names
+    one of our flags (an older Claude Code that does not know it), retries
+    without only that flag, keeping every other one, prints a one-line warning
+    to stderr, and remembers the rejection for later calls. A rejected
+    `--tools ""` is replaced by `--disallowedTools <built-in tools>`.
     """
-    global _hardening_supported
     env = {**os.environ, NESTED_ENV_VAR: "1"}
-
-    def run(hardened: bool) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            _claude_command(model, hardened),
+    # Each retry drops one more flag, so this bounds the loop.
+    for _ in range(len(HARDENING_FLAGS) + 2):
+        cmd = _claude_command(model, _rejected_flags)
+        result = subprocess.run(
+            cmd,
             input=prompt,
             capture_output=True,
             text=True,
@@ -58,13 +113,25 @@ def _run_claude(prompt: str, model: Optional[str], timeout: int) -> subprocess.C
             check=False,
             env=env,
         )
-
-    if _hardening_supported:
-        result = run(hardened=True)
-        if result.returncode == 0 or "unknown option" not in (result.stderr or "").lower():
+        if result.returncode == 0:
             return result
-        _hardening_supported = False
-    return run(hardened=False)
+        stderr = result.stderr or ""
+        flag = _named_flag(stderr, _flags_in(cmd))
+        if flag is None:
+            if "unknown option" in stderr.lower():
+                _warn(f"nested claude -p rejected an option: {stderr.strip().splitlines()[0]}")
+            return result
+        _rejected_flags.add(flag)
+        if flag == "--tools":
+            _warn("this Claude Code does not accept --tools; denying built-in tools "
+                  "with --disallowedTools instead. Update Claude Code for full isolation.")
+        elif flag == DISALLOWED_TOOLS_FLAG:
+            _warn("this Claude Code accepts neither --tools nor --disallowedTools; "
+                  "classifier calls run WITH tools. Update Claude Code.")
+        else:
+            _warn(f"this Claude Code does not accept {flag}; classifier calls run "
+                  "without it. Update Claude Code for full isolation.")
+    return result
 
 # Default model for semantic analysis — uses a cost-effective model
 # to avoid burning expensive Opus tokens on classification tasks.

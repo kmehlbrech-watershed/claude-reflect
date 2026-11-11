@@ -102,7 +102,8 @@ Confidence scores range 0.60-0.90 based on pattern strength and count.
 ### Semantic AI Validation (During /reflect)
 
 `scripts/lib/semantic_detector.py` provides AI-powered validation:
-- Uses `claude -p --output-format json` for semantic analysis
+- Every call goes through `_run_claude()`: `claude -p --output-format json --tools "" --strict-mcp-config --safe-mode --no-session-persistence --model <model>`, with `CLAUDE_REFLECT_NESTED=1` in the environment (the plugin's hooks return early on it). Never call `subprocess.run`/`claude` elsewhere in `scripts/`; a test enforces this.
+- On an older CLI that rejects one of those flags, `_run_claude()` drops only that flag (a rejected `--tools` becomes `--disallowedTools <BUILTIN_TOOLS>`), warns once on stderr, and remembers it for the process
 - **Multi-language support** — works for any language, not just English
 - **Better accuracy** — filters out false positives from regex
 - **Cleaner learnings** — extracts concise, actionable statements
