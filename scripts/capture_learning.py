@@ -13,6 +13,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.reflect_utils import (
+    in_nested_reflect_call,
     ensure_utf8_io,
     project_dir_from_transcript,
     queue_path_for_folder,
@@ -31,6 +32,9 @@ from lib.reflect_utils import (
 def main() -> int:
     """Main entry point."""
     ensure_utf8_io()
+    # Our own nested `claude -p` (semantic_detector): not the user's session.
+    if in_nested_reflect_call():
+        return 0
     # Read JSON from stdin
     input_data = sys.stdin.read()
     if not input_data:

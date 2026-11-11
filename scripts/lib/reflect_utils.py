@@ -195,6 +195,16 @@ def migrate_global_queue() -> None:
     global_path.unlink(missing_ok=True)
 
 
+def in_nested_reflect_call() -> bool:
+    """True inside a `claude -p` that semantic_detector started.
+
+    Hooks return early there: the prompt is claude-reflect's own classifier
+    input, not something the user typed, and reminders would only pollute it.
+    The variable name matches semantic_detector.NESTED_ENV_VAR.
+    """
+    return os.environ.get("CLAUDE_REFLECT_NESTED") == "1"
+
+
 def get_backup_dir() -> Path:
     """Get path to learnings backup directory."""
     return Path.home() / ".claude" / "learnings-backups"

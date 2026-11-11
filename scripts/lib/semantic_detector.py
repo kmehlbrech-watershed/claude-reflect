@@ -5,12 +5,66 @@ Uses `claude -p` (print mode) to semantically analyze user messages
 and determine if they contain reusable learnings.
 """
 import json
+import os
 import subprocess
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Default timeout for Claude CLI calls (seconds)
 DEFAULT_TIMEOUT = 30
+
+# Set in the environment of every nested `claude -p` call. The plugin's own
+# hooks check it and stay quiet, so analysis prompts are not captured back
+# into the learnings queue and reminders don't leak into the classifier.
+NESTED_ENV_VAR = "CLAUDE_REFLECT_NESTED"
+
+# The nested calls only classify text that is already in the prompt, and that
+# text comes from transcripts (untrusted). They need no tools and no MCP
+# servers, so they get none: no file access, no shell, no web.
+HARDENING_FLAGS = ["--tools", "", "--strict-mcp-config"]
+
+# Flipped off for the rest of the process if the installed claude is too old
+# to know HARDENING_FLAGS, so it is probed once rather than on every call.
+_hardening_supported = True
+
+
+def _claude_command(model: Optional[str], hardened: bool) -> List[str]:
+    cmd = ["claude", "-p", "--output-format", "json"]
+    if hardened:
+        cmd.extend(HARDENING_FLAGS)
+    if model:
+        cmd.extend(["--model", model])
+    return cmd
+
+
+def _run_claude(prompt: str, model: Optional[str], timeout: int) -> subprocess.CompletedProcess:
+    """Run one nested `claude -p` call with no tools, no MCP, and hooks muted.
+
+    Raises what subprocess.run raises (FileNotFoundError, TimeoutExpired);
+    callers already handle those. If the CLI rejects the hardening flags as
+    unknown (Claude Code older than --tools), retries once without them so
+    semantic detection keeps working, and remembers that for later calls.
+    """
+    global _hardening_supported
+    env = {**os.environ, NESTED_ENV_VAR: "1"}
+
+    def run(hardened: bool) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            _claude_command(model, hardened),
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+
+    if _hardening_supported:
+        result = run(hardened=True)
+        if result.returncode == 0 or "unknown option" not in (result.stderr or "").lower():
+            return result
+        _hardening_supported = False
+    return run(hardened=False)
 
 # Default model for semantic analysis — uses a cost-effective model
 # to avoid burning expensive Opus tokens on classification tasks.
@@ -72,21 +126,9 @@ def semantic_analyze(
     # Build the prompt
     prompt = ANALYSIS_PROMPT.format(text=text.replace('"', '\\"'))
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        # Use DEFAULT_MODEL if no explicit model specified
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             # Claude CLI failed
@@ -305,21 +347,8 @@ def validate_tool_error(
         suggested_guideline=suggested_guideline or "No suggestion"
     )
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             return None
@@ -483,21 +512,8 @@ def detect_contradictions(
     entries_text = "\n".join(f"- {e}" for e in entries)
     prompt = CONTRADICTION_PROMPT.format(entries=entries_text)
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             return []

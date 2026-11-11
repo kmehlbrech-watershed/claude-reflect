@@ -169,6 +169,8 @@ When you run `/reflect`, an AI-powered semantic filter:
 
 Example: A Spanish correction like `"no, usa Python"` is correctly detected even though it doesn't match English patterns.
 
+The check runs `claude -p` with no tools and no MCP servers (`--tools "" --strict-mcp-config`), since it only classifies text already in the prompt and that text comes from transcripts. claude-reflect's own hooks stay quiet inside it (`CLAUDE_REFLECT_NESTED=1`), so classifier prompts are never captured as learnings. On Claude Code versions without `--tools`, it falls back to the plain command.
+
 Each captured learning has a **confidence score** (0.60-0.95). The final score is the higher of regex and semantic confidence.
 
 ### Human Review

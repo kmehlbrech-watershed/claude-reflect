@@ -5,6 +5,13 @@ All notable changes to claude-reflect will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Nested `claude -p` calls run with no tools and no MCP servers.** `semantic_detector` builds every call through one helper that adds `--tools "" --strict-mcp-config`. The calls only classify text already in the prompt, and that text comes from transcripts, so a prompt injected into a transcript can no longer reach a shell, files or the web through them. If the installed Claude Code rejects the flags as unknown, the helper retries once without them and remembers that for the process.
+- **The plugin's hooks stay quiet inside those calls.** The helper sets `CLAUDE_REFLECT_NESTED=1`; all four hook scripts return early when it is set, so classifier prompts (which contain `remember:`) are no longer captured back into the learnings queue, and reminders no longer leak into the classifier's context.
+- 10 tests in `tests/test_nested_claude.py`.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs
