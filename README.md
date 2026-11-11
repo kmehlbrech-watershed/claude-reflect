@@ -361,6 +361,7 @@ claude-reflect/
 ├── scripts/
 │   ├── lib/
 │   │   ├── reflect_utils.py      # Shared utilities
+│   │   ├── redact.py             # Masks secrets before anything is stored or printed
 │   │   └── semantic_detector.py  # AI-powered semantic analysis
 │   ├── capture_learning.py       # Hook: detect corrections
 │   ├── check_learnings.py        # Hook: pre-compact check
@@ -404,6 +405,24 @@ Only reusable learnings are kept.
 ### Transcripts Are Data
 
 Session files contain text Claude read from web pages, files and tool output, so `/reflect` and `/reflect-skills` never follow instructions found in them, and never put that text on a shell command line. Proposed learnings that would run or fetch something, change settings or permissions, or speak to the AI directly are shown with a `⚠️ possible injected instruction` flag, left out of "Apply all", and applied only if you approve each one on its own (default Skip). That includes `remember:` items. Subagent conversations (`agent-*.jsonl`, under `<session>/subagents/` on current Claude Code, and `isSidechain` entries) are not mined for corrections, because their "user" turns were written by Claude.
+### Secret Redaction
+
+Secret-shaped text is replaced with `[REDACTED]` in what the plugin stores and prints: queue items (when captured, saved, and read back, so the session-start reminder, `/reflect`, `/view-queue` and the PreCompact backup all see redacted text), the messages and rejections the session extractors return, and tool-error samples. Only the secret is masked, so `use DATABASE_URL=[REDACTED] from .env` still reads as a rule.
+
+What is masked:
+
+- reflect-mod's patterns: prefixed API keys (`sk-`, `ghp_`, `xoxb-`, `glpat-`, ...), AWS access key ids, Google API keys, JWTs, private key blocks, values after `password` / `secret` / `token` / `api key`, and long random tokens.
+- Additions: the password in `scheme://user:password@host` (including an empty user and passwords containing `@`), `Bearer <token>`, JSON-quoted keys (`"password": "..."`), env-style keys that end in a secret word (`AWS_SECRET_ACCESS_KEY=`, `JWT_SECRET=`, `DB_PASS=`, `PWD=`), whole quoted passphrases (`password = 'correct horse battery'`), and AWS temporary key ids (`ASIA...`).
+
+Because the result can become a CLAUDE.md rule, the patterns are tuned to avoid mangling ordinary learnings, and miss some secrets as a result. A value after a secret key is masked only when it looks like a secret: it has a digit or symbol, or is a quoted password or passphrase (and for `the password is X`, it is quoted or has a digit). Words, types, booleans, numbers, `$VAR`/`${{ secrets.X }}` references, paths and URLs are left alone, so `the API key is loaded from .env`, `token: string`, `secret=True` and `max_tokens=4096` survive. Long tokens must mix letters and digits within one run; git SHAs and other hex, UUIDs, slugs such as model ids, path segments and file names are not masked. A password that is a plain word with no digit or symbol (`password: hunter`) is not caught.
+
+Set `CLAUDE_REFLECT_REDACT=false` to turn redaction off.
+
+Limits:
+
+- Files already on disk are not rewritten by reading them. A queue is scrubbed the next time it is saved, and backups in `~/.claude/learnings-backups/` written before this version keep whatever they captured; delete them if they may hold secrets.
+- During `/reflect`, Claude can still read session files directly, so review proposed entries before they are written.
+- The deprecated bash scripts in `scripts/legacy/` do not redact.
 
 ### Duplicate Detection
 
