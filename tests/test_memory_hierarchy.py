@@ -853,6 +853,38 @@ class TestFindClaudeFilesWithInclusions(unittest.TestCase):
         self.assertEqual(names, ["AGENTS.md", "architecture.md", "standards.md"])
 
     @patch("lib.reflect_utils.get_claude_dir")
+    def test_referenced_agents_md_is_flagged(self, mock_claude_dir):
+        """Referenced AGENTS.md files (any dir) carry agents_md=True; other docs don't.
+
+        /reflect must not route learnings to them as topic-aligned docs: only
+        the opt-in AGENTS.md sync writes AGENTS.md.
+        """
+        fake_claude = self.root / "fake_claude"
+        fake_claude.mkdir()
+        mock_claude_dir.return_value = fake_claude
+
+        (self.root / "CLAUDE.md").write_text("@AGENTS.md\n[Std](standards.md)\n")
+        (self.root / "AGENTS.md").write_text("- @architecture.md\n")
+        (self.root / "architecture.md").write_text("# Arch\n")
+        (self.root / "standards.md").write_text("# Std\n")
+        web = self.root / "web"
+        web.mkdir()
+        (web / "CLAUDE.md").write_text("@agents.md\n")
+        (web / "agents.md").write_text("# web agents\n")
+
+        files = find_claude_files(self.temp_dir)
+        flags = {
+            f["relative_path"]: f.get("agents_md", False)
+            for f in files if f["type"] == "referenced"
+        }
+        self.assertEqual(flags, {
+            "./AGENTS.md": True,
+            "./web/agents.md": True,
+            "./architecture.md": False,
+            "./standards.md": False,
+        })
+
+    @patch("lib.reflect_utils.get_claude_dir")
     def test_follow_includes_can_be_disabled(self, mock_claude_dir):
         """follow_includes=False returns no referenced files."""
         fake_claude = self.root / "fake_claude"

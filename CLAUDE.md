@@ -39,7 +39,7 @@ tests/                      → Test suite (pytest)
 | User Rules | `~/.claude/rules/*.md` | `user-rule` | Global modular rules |
 | Auto Memory | `~/.claude/projects/<project>/memory/*.md` | `auto-memory` | Low-confidence staging |
 | Skill Files | `./commands/*.md` | skill | Correction during skill use |
-| AGENTS.md | `./AGENTS.md` | agents | Cross-tool standard |
+| AGENTS.md | `./AGENTS.md` | agents | Cross-tool standard. Opt-in (`--agents-md`), project learnings only, never a referenced-doc target |
 
 ### Key Files
 

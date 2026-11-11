@@ -18,7 +18,7 @@ were reusable rules ([BACKLOG #1](../BACKLOG.md)). Regex cannot tell a rule from
 | Review | `/reflect`, when you remember to run it | a band above the prompt, right away |
 | Repeats | each one queued again | merged into one row with a count |
 | Applies | after CLAUDE.md is re-read | in the current session at once, and in CLAUDE.md |
-| Runs on | Claude Code, Codex/Cursor via AGENTS.md | Claude Code 2.1.286+ with mods |
+| Runs on | Claude Code, Codex/Cursor via opt-in AGENTS.md sync | Claude Code 2.1.286+ with mods |
 
 ## Install
 

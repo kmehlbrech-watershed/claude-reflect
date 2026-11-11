@@ -14,7 +14,7 @@ A self-learning system for Claude Code that captures corrections and discovers w
 |---|---|---|
 | You correct Claude | a hook queues it | a model check sees it at once, in any language |
 | You review | later, with `/reflect` | right away, in a band above the prompt |
-| Runs on | Claude Code, plus Codex/Cursor via AGENTS.md | Claude Code 2.1.286+ with mods |
+| Runs on | Claude Code, plus Codex/Cursor via opt-in AGENTS.md sync | Claude Code 2.1.286+ with mods |
 
 ![reflect-mod: a correction becomes a rule you can save with one press](assets/reflect-mod-band.png)
 
@@ -116,6 +116,7 @@ correction is captured twice. The Python plugin stays the choice for `/reflect -
 | `/reflect --scan-history` | Scan ALL past sessions for missed learnings |
 | `/reflect --dry-run` | Preview changes without applying |
 | `/reflect --targets` | Show detected config files (CLAUDE.md, AGENTS.md) |
+| `/reflect --agents-md` | Also sync project learnings into an existing `AGENTS.md` (off by default; set `CLAUDE_REFLECT_AGENTS_MD=true` in your shell profile or the `"env"` block of `settings.json` to always enable) |
 | `/reflect --review` | Show queue with confidence scores and decay status |
 | `/reflect --dedupe` | Find and consolidate similar entries in CLAUDE.md |
 | `/reflect --include-tool-errors` | Include tool execution errors in scan |
@@ -189,7 +190,7 @@ Approved learnings are synced to:
 - `./CLAUDE.md` (project-specific)
 - `./**/CLAUDE.md` (subdirectories - auto-discovered)
 - `./.claude/commands/*.md` (skill files - when correction relates to a skill)
-- `AGENTS.md` (if exists - works with Codex, Cursor, Aider, Jules, Zed, Factory)
+- `AGENTS.md` (opt-in with `--agents-md`, if it exists - works with Codex, Cursor, Aider, Jules, Zed, Factory). Only learnings routed to a shared project target are copied there, never global or personal ones, and existing entries in its claude-reflect section are kept.
 - Docs reachable from the above via `@filename` includes or markdown links (bounded depth, cycles handled, code blocks/external URLs skipped) — useful when CLAUDE.md delegates guidance to `standards.md`, `architecture.md`, etc.
 
 Run `/reflect --targets` to see which files will be updated.
@@ -305,6 +306,8 @@ User: "no, always run tests before deploying"
 This makes skills smarter over time, not just CLAUDE.md.
 
 ## Upgrading
+
+**AGENTS.md sync is now opt-in.** `/reflect` no longer writes `AGENTS.md` just because it exists. To keep syncing project learnings into it, pass `--agents-md`, or set `CLAUDE_REFLECT_AGENTS_MD=true` in your shell profile or in the `"env"` block of `~/.claude/settings.json`.
 
 ### From v2.0.x or earlier
 
