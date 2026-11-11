@@ -144,7 +144,7 @@ Hooks run automatically to detect and queue corrections:
 | `check_learnings.py` | Before compaction | Backs up queue and informs user |
 | `post_commit_reminder.py` | After git commit | Reminds to run /reflect after completing work |
 
-The queue (`~/.claude/projects/<project>/learnings-queue.json`) and its backups (`~/.claude/learnings-backups/`) hold your prompts verbatim, so they are written owner-only (`0600`, directory `0700`). Only the newest 20 backups are kept; set `CLAUDE_REFLECT_MAX_BACKUPS` to change that (`0` keeps all).
+The queue (`~/.claude/projects/<project>/learnings-queue.json`) and its backups (`~/.claude/learnings-backups/<project>/`) hold your prompts verbatim, so on macOS and Linux they are created owner-only (`0600`, directories `0700`). Windows has no equivalent of these modes, so there the files get your profile folder's usual permissions. Each project keeps only its newest 20 backups; set `CLAUDE_REFLECT_MAX_BACKUPS` to change that (`0` keeps all). Backups written by earlier versions sit directly in `~/.claude/learnings-backups/` and are never pruned or changed; delete them yourself once you no longer need them.
 
 **Stage 2: Process (Manual)**
 

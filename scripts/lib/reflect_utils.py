@@ -123,6 +123,40 @@ def make_private(path: Path, mode: int = 0o600) -> None:
         pass
 
 
+def make_private_dir(path: Path) -> None:
+    """Create a directory (and parents) and restrict it to its owner (0o700).
+
+    mkdir's mode only applies when the directory is new and is filtered by
+    the umask, so chmod afterwards as well. Same Windows caveat as
+    make_private.
+    """
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    make_private(path, 0o700)
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    """Write text to a new file that is owner-only from the moment it exists.
+
+    write_text creates the file with umask permissions (usually 0o644), so a
+    chmod afterwards leaves a window in which other users can read the
+    prompts. os.open with mode 0o600 closes it. A leftover file of the same
+    name (a crashed writer with a recycled pid) is removed first so O_EXCL
+    can create it afresh -- O_EXCL also refuses to follow a symlink planted
+    at that name.
+    """
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(str(path), flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    # Backstop for an fd whose mode was not honoured (some network/FUSE
+    # filesystems); a no-op where chmod is unsupported.
+    make_private(path)
+
+
 def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     """Write a queue to an explicit path, atomically.
 
@@ -134,8 +168,7 @@ def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
-        tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
-        make_private(tmp)
+        _write_private_text(tmp, json.dumps(items, indent=2))
         tmp.replace(path)
     finally:
         try:
@@ -189,19 +222,10 @@ def migrate_global_queue() -> None:
         try:
             project_queue_path = get_queue_path(project)
             # Merge with any existing project queue
-            existing = []
-            if project_queue_path.exists():
-                try:
-                    existing = json.loads(
-                        project_queue_path.read_text(encoding="utf-8")
-                    )
-                except (ValueError, IOError):
-                    existing = []
+            existing = load_queue_at(project_queue_path)
             existing.extend(project_items)
-            project_queue_path.parent.mkdir(parents=True, exist_ok=True)
-            project_queue_path.write_text(
-                json.dumps(existing, indent=2), encoding="utf-8"
-            )
+            # Atomic and owner-only, like every other queue write.
+            save_queue_at(project_queue_path, existing)
         except Exception:
             continue
 
@@ -220,11 +244,41 @@ def in_nested_reflect_call() -> bool:
 
 
 def get_backup_dir() -> Path:
-    """Get path to learnings backup directory."""
+    """Get path to learnings backup directory.
+
+    Backups live in one subfolder per project (see project_backup_dir).
+    Files directly in this directory were written by versions before the
+    per-project layout; nothing here touches them.
+    """
     return Path.home() / ".claude" / "learnings-backups"
 
 
+def project_backup_dir(queue_path: Path) -> Path:
+    """Backup folder for the project whose queue is at queue_path.
+
+    Named after the project's folder under ~/.claude/projects/, so each
+    project keeps (and prunes) its own backups: compacting in one project
+    never deletes another project's. A queue outside projects/ (the global
+    fallback) gets "_global".
+    """
+    folder = queue_path.parent
+    name = folder.name
+    if folder.parent.name != "projects" or name in ("", ".", ".."):
+        name = "_global"
+    return get_backup_dir() / name
+
+
 DEFAULT_MAX_BACKUPS = 20
+
+# What backup_file_name writes: pre-compact-YYYYMMDD-HHMMSS-<pid>.json.
+# The pid keeps two compactions in the same second from overwriting each
+# other. The pid-less form is what older versions wrote.
+_BACKUP_NAME_RE = re.compile(r"^pre-compact-(\d{8}-\d{6})(?:-(\d+))?\.json$")
+
+
+def backup_file_name() -> str:
+    """Filename for a new pre-compact backup."""
+    return f"pre-compact-{backup_timestamp()}-{os.getpid()}.json"
 
 
 def get_max_backups() -> int:
@@ -237,18 +291,27 @@ def get_max_backups() -> int:
     return value if value >= 0 else DEFAULT_MAX_BACKUPS
 
 
-def prune_backups(backup_dir: Path, keep: int) -> int:
+def prune_backups(backup_dir: Path, keep: int, protect: Optional[Path] = None) -> int:
     """Delete all but the newest `keep` pre-compact backups. Returns how many went.
 
-    Only files this plugin writes (pre-compact-*.json) are touched. Their
-    names sort by time (see backup_timestamp), so no stat calls are needed.
-    keep <= 0 keeps everything.
+    Only names matching this plugin's own pattern (_BACKUP_NAME_RE) are
+    considered, so a hand-made "pre-compact-manual.json" neither gets
+    deleted nor counts as the newest. They are ordered by the timestamp in
+    the name, then pid. `protect` (the backup just written) is never
+    deleted. keep <= 0 keeps everything.
     """
     if keep <= 0 or not backup_dir.is_dir():
         return 0
-    backups = sorted(backup_dir.glob("pre-compact-*.json"))
+    backups = []
+    for p in backup_dir.iterdir():
+        m = _BACKUP_NAME_RE.match(p.name)
+        if m and p.is_file():
+            backups.append(((m.group(1), int(m.group(2) or 0)), p))
+    backups.sort(key=lambda entry: entry[0])
     removed = 0
-    for old in backups[:-keep]:
+    for _, old in backups[:-keep]:
+        if protect is not None and old.name == protect.name:
+            continue
         try:
             old.unlink()
             removed += 1

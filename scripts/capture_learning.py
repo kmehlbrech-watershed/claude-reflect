@@ -69,8 +69,7 @@ def main() -> int:
     # Initialize queue if doesn't exist
     queue_path = queue_path_for_folder(project_dir) if project_dir else get_queue_path()
     if not queue_path.exists():
-        queue_path.parent.mkdir(parents=True, exist_ok=True)
-        queue_path.write_text("[]", encoding="utf-8")
+        save_queue_at(queue_path, [])  # owner-only from the start
 
     # Detect patterns
     item_type, patterns, confidence, sentiment, decay_days = detect_patterns(prompt)
