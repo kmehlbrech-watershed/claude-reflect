@@ -13,14 +13,14 @@ allowed-tools: Read, Edit, Write, Glob, Bash, Grep, AskUserQuestion, TodoWrite
 - `--organize`: Analyze memory hierarchy and suggest reorganization across tiers.
 - `--include-tool-errors`: Include project-specific tool execution errors in scan (auto-enabled with `--scan-history`).
 - `--model MODEL`: Model for semantic analysis (default: `sonnet`). Use `haiku` for faster/cheaper runs or `opus` for maximum accuracy.
-- `--agents-md`: Also sync project learnings into `./AGENTS.md` for this run. Off by default; set `CLAUDE_REFLECT_AGENTS_MD=true` to always enable it.
+- `--agents-md`: Also sync project learnings into an existing `./AGENTS.md` for this run. Off by default. To always enable it, set `CLAUDE_REFLECT_AGENTS_MD=true` (only `true`, any case, turns it on) in your shell profile (`export CLAUDE_REFLECT_AGENTS_MD=true`) or in the `"env"` block of `~/.claude/settings.json` or `.claude/settings.json`.
 
 ## Context
 - Project CLAUDE.md: @CLAUDE.md
 - Global CLAUDE.md: @~/.claude/CLAUDE.md
 - Learnings queue (per-project): !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" 2>/dev/null || echo "[]"`
 - Current project: !`pwd`
-- AGENTS.md sync (env): !`echo "${CLAUDE_REFLECT_AGENTS_MD:-off}"`
+- AGENTS.md sync (env): !`printf '%s\n' "${CLAUDE_REFLECT_AGENTS_MD:-off}"`
 
 ## Multi-Target Export
 
@@ -52,6 +52,8 @@ files = find_claude_files()
 # Types: 'global', 'root', 'local', 'subdirectory', 'rule', 'user-rule', 'referenced'
 # 'referenced' files are docs reachable from memory files via @-includes or
 # markdown links; they include 'referenced_from' and 'depth' fields.
+# A referenced AGENTS.md (any directory) has 'agents_md': True: it is NOT a
+# routing target. Only Step 7c writes ./AGENTS.md, and only when sync is on.
 ```
 
 Or discover manually:
@@ -76,7 +78,7 @@ ls ~/.claude/rules/*.md 2>/dev/null
 - **Personal/local** (machine-specific, not for team) → `./CLAUDE.local.md`
 - **Low-confidence** (0.60-0.74) → auto memory for later promotion
 - **Project-specific** → `./CLAUDE.md` or subdirectory file
-- **Topic-aligned referenced docs** (e.g. `standards.md`, `architecture.md` reached via `@` or markdown links from CLAUDE.md / AGENTS.md) → that doc, when the learning matches its topic
+- **Topic-aligned referenced docs** (e.g. `standards.md`, `architecture.md` reached via `@` or markdown links from CLAUDE.md / AGENTS.md) → that doc, when the learning matches its topic. **Never an AGENTS.md** (any file named `AGENTS.md`, in any directory, including one `@`-included by CLAUDE.md): it is not a routing target, even when its topic matches. Docs reached *through* AGENTS.md (e.g. `standards.md`) remain valid targets.
 - Let users override routing with AI reasoning
 
 **Note on Confidence & Decay:**
@@ -99,7 +101,7 @@ ls ~/.claude/rules/*.md 2>/dev/null
 
 ```
 TodoWrite tasks for /reflect:
-1. "Parse arguments and check flags" (--dry-run, --scan-history, etc.)
+1. "Parse arguments and check flags" (--dry-run, --scan-history, --agents-md, etc.)
 2. "Load learnings queue for this project (path from project_paths.py)"
 3. "Scan historical sessions" (if --scan-history)
 4. "Validate learnings with semantic analysis"
@@ -107,7 +109,7 @@ TodoWrite tasks for /reflect:
 6. "Deduplicate similar learnings"
 7. "Check for duplicates in existing CLAUDE.md"
 8. "Present summary and get user decision"
-9. "Apply changes to CLAUDE.md/AGENTS.md"
+9. "Apply changes to target files" (AGENTS.md only if sync is on)
 10. "Clear queue and confirm completion"
 ```
 
@@ -130,7 +132,7 @@ TodoWrite tasks for /reflect:
     {"content": "Deduplicate similar learnings", "status": "pending", "activeForm": "Removing duplicate learnings"},
     {"content": "Check existing CLAUDE.md for duplicates", "status": "pending", "activeForm": "Checking for existing entries"},
     {"content": "Present summary to user", "status": "pending", "activeForm": "Presenting learnings summary"},
-    {"content": "Apply changes to target files", "status": "pending", "activeForm": "Writing to CLAUDE.md/AGENTS.md"},
+    {"content": "Apply changes to target files", "status": "pending", "activeForm": "Writing to target files"},
     {"content": "Clear queue and confirm", "status": "pending", "activeForm": "Finalizing and clearing queue"}
   ]
 }
@@ -153,7 +155,11 @@ Detect and display all AI assistant config files with **line counts** and **size
 1. Find all memory tier files using `find_claude_files()` (discovers CLAUDE.md, CLAUDE.local.md, rule files)
 2. Count lines in each file
 3. Check for auto memory directory
-4. Display with status indicator:
+4. Check for `./AGENTS.md` directly: `find_claude_files()` only lists it when a
+   memory file references it, so run `test -f AGENTS.md && wc -l < AGENTS.md`.
+   Show the sync state next to it (`on` if `--agents-md` was passed or the
+   "AGENTS.md sync (env)" context line is `true` in any case, else `off`).
+5. Display with status indicator:
    - `✓` = under 150 lines (healthy)
    - `⚠️` = over 150 lines (consider cleanup)
 
@@ -192,12 +198,15 @@ Rule Files:
 Referenced Docs (via @ / markdown links):
   ./docs/standards.md                    ← from ./CLAUDE.md            (depth 1)
   ./docs/architecture.md                 ← from ./docs/standards.md    (depth 2)
+  ./AGENTS.md                            ← from ./CLAUDE.md            (depth 1, not a routing target)
 
 Auto Memory:
   ~/.claude/projects/.../memory/         3 files (general.md, tool-usage.md, workflow.md)
 
 Other:
-  AGENTS.md                              ✗ not found   (sync: off, enable with --agents-md)
+  ./AGENTS.md                           64 lines  ✓   (sync: off, enable with --agents-md)
+  OR
+  ./AGENTS.md                            ✗ not found
 
 ────────────────────────────────────────────────────────────
 ⚠️  ./CLAUDE.md exceeds 150 lines
@@ -386,7 +395,9 @@ auto_memory = read_auto_memory()
 all_entries = read_all_memory_entries()
 ```
 
-Count lines, entries, and files for each tier.
+Count lines, entries, and files for each tier. An AGENTS.md that shows up as a
+referenced doc (`agents_md: True`) is read-only here: count and report its
+entries, but never propose moving, removing or rewriting them.
 
 **2. Detect issues:**
 
@@ -503,13 +514,42 @@ If user chooses "Yes, scan history", proceed as if `--scan-history` was passed.
 - Process all learnings with project filtering
 - Show proposed changes with line numbers
 - Do NOT prompt for actions, do NOT write
-- End with: "Dry run complete. Run /reflect without --dry-run to apply."
+- If AGENTS.md sync is `on` (below), include the planned AGENTS.md lines from Step 4
+- End with: "Dry run complete. Run /reflect without --dry-run to apply." followed by the AGENTS.md note, if any
 
 **If user passed `--scan-history`:**
 - FIRST: Load the queue (Step 1) - queued items are NEVER skipped
 - THEN: Scan ALL historical sessions for this project (Step 0.5)
 - Combine queue items + history scan results into working list
 - Proceed to Step 3 (Project-Aware Filtering)
+
+**Resolve AGENTS.md sync (every run, before any other step):**
+
+Decide this once, here. Steps 4, 6, 7c and 9 only read the result.
+
+1. Sync is *requested* if `--agents-md` was passed, or the "AGENTS.md sync (env)"
+   context line is `true` (any case). Any other value (`off`, `1`, `yes`, empty)
+   means not requested.
+2. Check the file: `test -f AGENTS.md && echo found || echo missing`
+3. If requested and found, check whether `./CLAUDE.md` already brings AGENTS.md
+   into Claude's context (skip both if `./CLAUDE.md` doesn't exist):
+   ```bash
+   grep -nE '(^|[^[:alnum:]_.])@(\./)?AGENTS\.md' CLAUDE.md
+   python3 -c "import os; print(os.path.samefile('CLAUDE.md', 'AGENTS.md'))"
+   ```
+
+Record exactly one state, and its note (if any):
+
+| State | When | Effect and note |
+|-------|------|-----------------|
+| `on` | requested, found, neither check matched | Steps 4, 6 and 7c handle AGENTS.md. No note. |
+| `off` | not requested | Never write AGENTS.md. If found, note: `AGENTS.md found - not updated (use --agents-md to sync project learnings)` |
+| `missing` | requested, not found | Never create it. Note: `AGENTS.md sync requested, but ./AGENTS.md does not exist - not created` |
+| `same-file` | `samefile` printed `True` (symlink or hard link) | Skip 7c: anything written to ./CLAUDE.md is already in AGENTS.md. Note: `AGENTS.md is the same file as CLAUDE.md - project learnings reach it through CLAUDE.md` |
+| `included` | the grep matched (and not `same-file`) | Skip 7c: Claude already loads AGENTS.md through the include, so a copy would put each learning in its context twice. Note: `AGENTS.md sync skipped - ./CLAUDE.md @-includes AGENTS.md, so copies would load twice in Claude. Learnings went to CLAUDE.md only; move any that other tools need into AGENTS.md by hand.` |
+
+Show the note in the Step 6 summary, and print it as the last line on every way
+out of /reflect: Step 9, `--dry-run`, "Skip all", and "Cancel".
 
 ### Step 0.5: Historical Scan (only with --scan-history)
 
@@ -1096,6 +1136,35 @@ entries = read_all_memory_entries()
 If duplicate found:
 - Show: "⚠️ SIMILAR in [source_type] [source_file]: Line [N]: [content]"
 - Offer: [m]erge | [r]eplace | [a]dd anyway | [s]kip
+- If the match is in an AGENTS.md (a referenced entry whose `source_file` ends
+  in `AGENTS.md`), offer only [a]dd anyway | [s]kip. Never merge into or
+  replace lines in AGENTS.md here; AGENTS.md changes are planned only in 4a.
+
+**4a. Plan AGENTS.md changes (only when AGENTS.md sync is `on` in Step 0):**
+
+Do this now, not after approval, so Step 6 shows every AGENTS.md change.
+
+1. Read `./AGENTS.md` and find the claude-reflect section: from the
+   `<!-- Auto-generated by claude-reflect` line to `<!-- End claude-reflect section -->`.
+   - Both markers, start before end: that is the section. Count its bullets for `KEEP [N]`.
+   - Neither marker: no section yet; 7c will append one. `KEEP 0`.
+   - Only one marker, or end before start: the section is broken. Don't guess
+     where it ends. Plan no AGENTS.md changes; Step 6 shows
+     `AGENTS.md: claude-reflect section markers are broken - not updated (fix them by hand)`.
+2. For each learning that can go to AGENTS.md (see 7c "What goes in"), compare
+   it with every bullet in the file, inside and outside the section, for
+   duplicates and contradictions:
+   - Same meaning as an existing bullet → no AGENTS.md change for it.
+   - Contradicts or refines a bullet inside the section → `Line [N]: UPDATE "[old]" → "[new]"`.
+   - Contradicts a bullet outside the section (team-written text) → no change;
+     Step 6 shows `Line [N]: CONFLICT "[existing]" (outside claude-reflect section, not changed)`.
+   - Otherwise → `ADD "[bullet]"`, with the scope prefix and heading from 7c.
+3. Mirror project replacements: when a learning will `REPLACE`/`UPDATE` a line in
+   `./CLAUDE.md`, a subdirectory CLAUDE.md or a project rule, and the old rule is
+   also a bullet in the AGENTS.md section, plan an `UPDATE` for that AGENTS.md
+   line too, so the two files don't contradict each other after the run.
+4. If Step 5 later drops a learning or routes it elsewhere, drop or redo its
+   AGENTS.md line before showing Step 6.
 
 ### Step 5: Present Summary and Get User Decision
 
@@ -1188,7 +1257,7 @@ Use the AskUserQuestion tool:
 - **"Apply all"** → Proceed to Step 6 (Final Confirmation)
 - **"Select which to apply"** → Go to Step 5.1 (Selection Mode)
 - **"Review details first"** → Show full learning cards (format below), then return to 5b
-- **"Skip all"** → Go to Step 8 (Clear Queue)
+- **"Skip all"** → Go to Step 8 (Clear Queue), then Step 9 (which prints the AGENTS.md note from Step 0, if any)
 
 **Full learning card format (for "Review details first"):**
 ```
@@ -1283,13 +1352,19 @@ Skill Files:
   commands/deploy.md: ADD "Run tests before build step"
   commands/commit.md: ADD "Include file count in message"
 
-AGENTS.md (only when sync is enabled - see 7c):
+AGENTS.md (sync on - planned in Step 4a):
   ADD "Use pnpm, not npm"
+  ADD "(frontend/) Use Vitest, not Jest"
+  Line [N]: UPDATE "[old]" → "[new]"
   KEEP [N] existing entries
 
 Skipped: [N] learnings (including [M] from other projects)
 ════════════════════════════════════════════════════════════
 ```
+
+Show the AGENTS.md block only when sync is `on` and Step 4a planned at least one
+`ADD`, `UPDATE` or `CONFLICT` line. Otherwise show the AGENTS.md note from Step 0 (or the broken-markers
+line from Step 4a) in its place, if there is one.
 
 **6b. Use AskUserQuestion for confirmation:**
 ```json
@@ -1299,7 +1374,8 @@ Skipped: [N] learnings (including [M] from other projects)
     "header": "Confirm",
     "multiSelect": false,
     "options": [
-      {"label": "Yes, apply all", "description": "[X] to Global, [Y] to Project, [Z] to Skills"},
+      {"label": "Yes, apply all", "description": "[X] to Global, [Y] to Project, [Z] to Skills, [W] to AGENTS.md"},
+      {"label": "Apply, but skip AGENTS.md", "description": "Apply everything except the [W] AGENTS.md changes"},
       {"label": "Go back", "description": "Return to selection to adjust"},
       {"label": "Cancel", "description": "Don't apply anything, keep queue"}
     ]
@@ -1307,10 +1383,14 @@ Skipped: [N] learnings (including [M] from other projects)
 }
 ```
 
+Include "Apply, but skip AGENTS.md" and the ", [W] to AGENTS.md" part only when
+the Step 6 summary has AGENTS.md `ADD` or `UPDATE` lines ([W] is their count).
+
 **6c. Handle response:**
 - **"Yes, apply all"** → Proceed to Step 7
+- **"Apply, but skip AGENTS.md"** → Proceed to Step 7, but skip 7c; Step 9 shows `AGENTS.md  skipped (your choice)`
 - **"Go back"** → Return to Step 5b
-- **"Cancel"** → Exit without changes (keep queue intact)
+- **"Cancel"** → Exit without changes (keep queue intact), then print the AGENTS.md note from Step 0, if any
 
 ### Step 7: Apply Changes
 
@@ -1320,6 +1400,9 @@ Only after final confirmation:
 1. Read current CLAUDE.md files
 2. Use Edit tool with precise old_string from detected line numbers
 3. For new entries, add after the relevant section header
+4. Learnings routed to a topic-aligned referenced doc are written to that doc
+   the same way. Never write to a file named AGENTS.md here, even one reached
+   through `@AGENTS.md` or a markdown link: only 7c writes AGENTS.md.
 
 **7a.1. Apply to Rule Files (if any routed to rules):**
 
@@ -1390,12 +1473,9 @@ For learnings routed to skill files in Step 5a.2:
 **7c. Apply to AGENTS.md (opt-in):**
 
 AGENTS.md is usually committed and read by teammates and by other tools, so it is
-never written as a side effect. Skip this step entirely unless BOTH:
-- `--agents-md` was passed, or the "AGENTS.md sync (env)" context line above is `true`; and
-- `./AGENTS.md` already exists (do not create it).
-
-If AGENTS.md exists but sync is off, add one line to the Step 9 summary:
-`AGENTS.md found - not updated (use --agents-md to sync project learnings)`.
+never written as a side effect. Skip this step entirely unless the AGENTS.md
+state from Step 0 is `on` and the user chose "Yes, apply all" in Step 6.
+Never create AGENTS.md, and never write any other file named AGENTS.md.
 
 **What goes in:** only learnings the user routed to a shared *project* target in
 Step 5 (`./CLAUDE.md`, a subdirectory CLAUDE.md, or `./.claude/rules/*.md`).
@@ -1403,33 +1483,40 @@ Never copy learnings routed to `~/.claude/CLAUDE.md`, `~/.claude/rules/`,
 `CLAUDE.local.md`, auto memory, or skill files: those are personal or
 tool-specific, and AGENTS.md would publish them to the whole team.
 
-These entries must already appear in the Step 6 summary under "AGENTS.md". If
-they were not shown there, do not write them.
+Write exactly the AGENTS.md lines approved in the Step 6 summary (planned in
+Step 4a), nothing else. If a line was not shown there, do not write it.
 
-**Format:**
+**Scope prefix:** AGENTS.md is read at the repo root by tools that don't know
+about subdirectory CLAUDE.md files or `paths:` frontmatter, so keep the scope in
+the bullet text:
+- Routed to `./CLAUDE.md` or a project rule without `paths:` → no prefix.
+- Routed to a subdirectory CLAUDE.md → its directory: `(frontend/) Use Vitest, not Jest`.
+- Routed to a project rule with `paths:` → those paths: `(src/api/, src/services/) Return 4xx for validation errors`.
+
+**Format:** use `###` versions of the standard section headers (see "Section Headers").
 
 ```markdown
 ## Claude-Reflect Learnings
 
 <!-- Auto-generated by claude-reflect. Edit entries freely; new ones are appended. -->
 
-### Model Preferences
-- Use gpt-5.1 for reasoning tasks
-
 ### Tool Usage
-- Use local database cache to minimize API calls
+- Use pnpm, not npm
+
+### Project Conventions
+- (frontend/) Use Vitest, not Jest
 
 <!-- End claude-reflect section -->
 ```
 
 **Update Strategy (merge, never drop):**
-- Look for the existing `<!-- Auto-generated by claude-reflect` marker.
-- If found: keep every bullet already in the section (including ones a person
-  edited), add the new learnings under the right heading, and skip a new
-  learning if an existing bullet already says the same thing. Remove or reword
-  an existing bullet only when it was shown as `UPDATE`/`REMOVE` in the Step 6
-  summary and the user approved it.
-- If not found: APPEND the section at the end of the file.
+- Section found (both markers, checked in Step 4a): keep every bullet already
+  in it, including ones a person edited. Add each new bullet under its heading;
+  if that heading isn't in the section yet, add it just above the
+  `<!-- End claude-reflect section -->` line. Change or remove an existing bullet
+  only as an approved `UPDATE` line from Step 6.
+- No markers: APPEND the whole section at the end of the file.
+- Broken markers (only one, or out of order): Step 4a planned nothing, so write nothing.
 - Always preserve the user's existing content outside the marked section.
 
 ### Step 8: Clear Queue
@@ -1450,13 +1537,15 @@ DONE: Applied [N] learnings
 ════════════════════════════════════════════════════════════
   ✓ ~/.claude/CLAUDE.md    [N] entries
   ✓ ./CLAUDE.md            [N] entries
-  ✓ AGENTS.md              [N] entries (only with --agents-md)
+  ✓ AGENTS.md              [N] added, [M] updated (only when sync is on)
   ⚡ commands/deploy.md     [N] skill improvements
   ⚡ commands/commit.md     [N] skill improvements
 
   Skipped: [N]
 ════════════════════════════════════════════════════════════
 ```
+
+End with the AGENTS.md note from Step 0, if any.
 
 ### Step 10: Mark Initialized (Per-Project)
 

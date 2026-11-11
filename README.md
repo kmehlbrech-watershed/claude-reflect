@@ -14,7 +14,7 @@ A self-learning system for Claude Code that captures corrections and discovers w
 |---|---|---|
 | You correct Claude | a hook queues it | a model check sees it at once, in any language |
 | You review | later, with `/reflect` | right away, in a band above the prompt |
-| Runs on | Claude Code, plus Codex/Cursor via AGENTS.md | Claude Code 2.1.286+ with mods |
+| Runs on | Claude Code, plus Codex/Cursor via opt-in AGENTS.md sync | Claude Code 2.1.286+ with mods |
 
 ![reflect-mod: a correction becomes a rule you can save with one press](assets/reflect-mod-band.png)
 
@@ -116,7 +116,7 @@ correction is captured twice. The Python plugin stays the choice for `/reflect -
 | `/reflect --scan-history` | Scan ALL past sessions for missed learnings |
 | `/reflect --dry-run` | Preview changes without applying |
 | `/reflect --targets` | Show detected config files (CLAUDE.md, AGENTS.md) |
-| `/reflect --agents-md` | Also sync project learnings into an existing `AGENTS.md` (off by default; `CLAUDE_REFLECT_AGENTS_MD=true` to always enable) |
+| `/reflect --agents-md` | Also sync project learnings into an existing `AGENTS.md` (off by default; set `CLAUDE_REFLECT_AGENTS_MD=true` in your shell profile or the `"env"` block of `settings.json` to always enable) |
 | `/reflect --review` | Show queue with confidence scores and decay status |
 | `/reflect --dedupe` | Find and consolidate similar entries in CLAUDE.md |
 | `/reflect --include-tool-errors` | Include tool execution errors in scan |
@@ -306,6 +306,8 @@ User: "no, always run tests before deploying"
 This makes skills smarter over time, not just CLAUDE.md.
 
 ## Upgrading
+
+**AGENTS.md sync is now opt-in.** `/reflect` no longer writes `AGENTS.md` just because it exists. To keep syncing project learnings into it, pass `--agents-md`, or set `CLAUDE_REFLECT_AGENTS_MD=true` in your shell profile or in the `"env"` block of `~/.claude/settings.json`.
 
 ### From v2.0.x or earlier
 

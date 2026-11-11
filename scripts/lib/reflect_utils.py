@@ -576,6 +576,11 @@ def _format_relative_path(path: Path, root: Path) -> str:
         return canonical.as_posix()
 
 
+def _is_agents_md(path: Path) -> bool:
+    """True when the file is an AGENTS.md (any directory, any case)."""
+    return path.name.lower() == "agents.md"
+
+
 def _follow_inclusion_graph(
     seed_files: List[Dict[str, Any]],
     root: Path,
@@ -600,6 +605,8 @@ def _follow_inclusion_graph(
     Returns:
         List of dicts for newly discovered referenced docs (excluding seeds):
             {path, relative_path, type='referenced', referenced_from, depth}
+        AGENTS.md files also carry agents_md=True: they are never routing
+        targets (only /reflect's opt-in AGENTS.md sync writes them).
     """
     if max_depth <= 0 or not seed_files:
         return []
@@ -647,13 +654,19 @@ def _follow_inclusion_graph(
             if resolved in seed_paths:
                 continue
 
-            discovered.append({
+            entry = {
                 "path": str(resolved),
                 "relative_path": _format_relative_path(resolved, root),
                 "type": "referenced",
                 "referenced_from": formatted_current,
                 "depth": depth + 1,
-            })
+            }
+            if _is_agents_md(resolved):
+                # Shared with other tools and teammates: /reflect writes it
+                # only through its opt-in AGENTS.md sync, never as a
+                # topic-aligned referenced doc.
+                entry["agents_md"] = True
+            discovered.append(entry)
             if len(discovered) >= max_nodes:
                 break
             queue.append((resolved, depth + 1))
@@ -684,7 +697,8 @@ def find_claude_files(
         List of dicts with {path, relative_path, type, ...} for each file found.
         Types: 'global', 'root', 'local', 'subdirectory', 'rule', 'user-rule',
         'referenced'. Rule files include a 'frontmatter' field. Referenced
-        files include 'referenced_from' and 'depth' fields.
+        files include 'referenced_from' and 'depth' fields, and referenced
+        AGENTS.md files also have 'agents_md': True (not a routing target).
     """
     root = Path(root_dir) if root_dir else Path.cwd()
     results = []

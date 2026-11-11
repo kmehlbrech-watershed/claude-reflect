@@ -56,7 +56,7 @@ Adds **claude-reflect** to external_plugins - a self-learning system that captur
 
 - **Automatic capture**: Hooks detect correction patterns ("no, use X", "actually...", "remember:") and queue them
 - **Human review**: `/reflect` command processes queue with user approval before writing
-- **Multi-target sync**: Updates ~/.claude/CLAUDE.md, ./CLAUDE.md, and AGENTS.md (industry standard)
+- **Multi-target sync**: Updates ~/.claude/CLAUDE.md and ./CLAUDE.md, plus an existing AGENTS.md (industry standard) when opted in with `--agents-md`
 - **Historical scan**: `/reflect --scan-history` finds corrections from past sessions
 
 ## Plugin Features
@@ -102,7 +102,7 @@ Add claude-reflect to Workflow Orchestration
 
 ### Entry to Add (in README.md under "Workflow Orchestration")
 ```markdown
-- [claude-reflect](https://github.com/bayramannakov/claude-reflect) - Self-learning system that captures corrections during sessions and syncs to CLAUDE.md. Features hook-based detection, confidence scoring, and multi-target export to AGENTS.md.
+- [claude-reflect](https://github.com/bayramannakov/claude-reflect) - Self-learning system that captures corrections during sessions and syncs to CLAUDE.md. Features hook-based detection, confidence scoring, and opt-in export to AGENTS.md.
 ```
 
 ---
@@ -158,7 +158,7 @@ A self-learning system for Claude Code that:
 - Captures corrections during sessions via hooks
 - Queues learnings with confidence scoring
 - Processes with human review via `/reflect`
-- Syncs to CLAUDE.md and AGENTS.md
+- Syncs to CLAUDE.md, and to AGENTS.md when opted in
 
 ### Validation
 - [x] Ran `./validate-plugins.sh` successfully
@@ -188,7 +188,7 @@ Description: Self-learning system that captures corrections during Claude Code s
 - Hook-based pattern detection (corrections, positive feedback, explicit markers)
 - Confidence scoring (0.60-0.90)
 - Human review via /reflect command
-- Multi-target export (CLAUDE.md + AGENTS.md)
+- Multi-target export (CLAUDE.md, plus opt-in AGENTS.md)
 
 The plugin is production-ready with MIT license. Happy to provide any additional information needed.
 
@@ -280,14 +280,14 @@ Check their CONTRIBUTING.md or open an issue requesting addition.
 > Captures user corrections during sessions, queues with confidence scoring, processes with human review via /reflect command
 
 ### Full Description
-> claude-reflect is a two-stage self-learning system for Claude Code. Stage 1 automatically captures corrections via hooks - detecting patterns like "no, use X", "actually...", and explicit "remember:" markers. Stage 2 is the `/reflect` command where you review queued learnings before they're written to CLAUDE.md. Supports confidence scoring, historical session scanning, semantic deduplication, and multi-target export to AGENTS.md (Codex, Cursor, Aider, Jules, Zed, Factory).
+> claude-reflect is a two-stage self-learning system for Claude Code. Stage 1 automatically captures corrections via hooks - detecting patterns like "no, use X", "actually...", and explicit "remember:" markers. Stage 2 is the `/reflect` command where you review queued learnings before they're written to CLAUDE.md. Supports confidence scoring, historical session scanning, semantic deduplication, and opt-in export to AGENTS.md (Codex, Cursor, Aider, Jules, Zed, Factory).
 
 ### Key Features (Bullet Points)
 - Automatic correction detection via hooks
 - Confidence scoring (0.60-0.90)
 - Human review before writing
 - Historical session scanning
-- Multi-target sync (CLAUDE.md + AGENTS.md)
+- Multi-target sync (CLAUDE.md, plus opt-in AGENTS.md)
 - Semantic deduplication
 
 ---
