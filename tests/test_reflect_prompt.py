@@ -17,10 +17,13 @@ class TestReflectPromptAgentsMd(unittest.TestCase):
     def setUpClass(cls):
         cls.text = REFLECT_MD.read_text(encoding="utf-8")
 
-    def test_env_context_line_uses_printf(self):
+    def test_env_context_line_uses_bundled_script(self):
+        # A `!` line with "${CLAUDE_REFLECT_AGENTS_MD:-off}" (echo or printf)
+        # fails Claude Code's permission check and aborts /reflect.
         self.assertIn(
-            "!`printf '%s\\n' \"${CLAUDE_REFLECT_AGENTS_MD:-off}\"`", self.text)
-        self.assertNotRegex(self.text, r"echo \"\$\{CLAUDE_REFLECT_AGENTS_MD")
+            '- AGENTS.md sync (env): !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" --agents-md-env`',
+            self.text)
+        self.assertNotIn("${CLAUDE_REFLECT_AGENTS_MD", self.text)
 
     def test_agents_md_is_never_a_referenced_doc_target(self):
         routing = next(

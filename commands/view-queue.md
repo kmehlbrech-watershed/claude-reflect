@@ -1,6 +1,6 @@
 ---
 description: View the learnings queue without processing
-allowed-tools: Bash, Read
+allowed-tools: Read, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *)
 ---
 
 ## Context
@@ -40,61 +40,27 @@ or corrections will be auto-detected. Run /reflect to process.
 
 ## Implementation
 
-**Step 1: Read the project-scoped queue file:**
+**Step 1: Read the project-scoped queue:**
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" 2>/dev/null || echo "[]"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" --summary 2>/dev/null || echo "[]"
 ```
 
-**Step 2: Parse and format each item with:**
-- **Confidence score**: `[0.XX]` format, from `item.confidence` (default 0.60 if missing)
-- **Message preview**: First 50 chars with "..." if longer, from `item.message`
-- **Pattern name**: In parentheses, from `item.patterns` (show first pattern if multiple)
-- **Relative timestamp**: Human-readable time difference from `item.timestamp`
+It prints one object per item: `timestamp`, `age` (already a relative time:
+"just now", "X minutes ago", "X hours ago", "X days ago" or "X weeks ago"),
+`type`, `confidence`, `decay_days`, `patterns` and `message`. Missing values
+are `null` (or `[]` for `patterns`).
 
-**Relative time calculation:**
-
-Calculate the difference between now and `item.timestamp` (ISO 8601 format):
-- Less than 1 minute → "just now"
-- Less than 1 hour → "X minutes ago"
-- Less than 24 hours → "X hours ago"
-- Less than 7 days → "X days ago"
-- Otherwise → "X weeks ago" or show date
-
-**Python snippet for relative time:**
-```python
-from datetime import datetime, timezone
-
-def relative_time(iso_timestamp):
-    """Convert ISO timestamp to relative time string."""
-    try:
-        dt = datetime.fromisoformat(iso_timestamp.replace('Z', '+00:00'))
-        now = datetime.now(timezone.utc)
-        diff = now - dt
-
-        seconds = diff.total_seconds()
-        if seconds < 60:
-            return "just now"
-        elif seconds < 3600:
-            minutes = int(seconds / 60)
-            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-        elif seconds < 86400:
-            hours = int(seconds / 3600)
-            return f"{hours} hour{'s' if hours > 1 else ''} ago"
-        elif seconds < 604800:
-            days = int(seconds / 86400)
-            return f"{days} day{'s' if days > 1 else ''} ago"
-        else:
-            weeks = int(seconds / 604800)
-            return f"{weeks} week{'s' if weeks > 1 else ''} ago"
-    except:
-        return "unknown"
-```
+**Step 2: Format each item with:**
+- **Confidence score**: `[0.XX]` format, from `confidence` (0.60 if null)
+- **Message preview**: First 50 chars with "..." if longer, from `message`
+- **Pattern name**: In parentheses, from `patterns` (show first pattern if multiple)
+- **Relative timestamp**: `age`, as printed
 
 **Formatting rules:**
 - Confidence: Always show 2 decimal places `[0.85]`
 - Message: Truncate at 50 chars, add "..." if longer
 - Patterns: Show in parentheses `(pattern-name)`
-- If patterns field is empty, show `(auto)` for auto-detected or `(explicit)` for remember:
+- If patterns is empty, show `(auto)` for auto-detected or `(explicit)` for remember: (`type` is `explicit`)
 - Time: Right-aligned relative timestamp
 
 **Example output line:**

@@ -178,6 +178,8 @@ Each captured learning has a **confidence score** (0.60-0.95). The final score i
 
 ### Human Review
 
+`/reflect` and `/reflect-skills` don't pre-approve file edits or general shell commands: in the default permission mode Claude Code asks before each write to CLAUDE.md, AGENTS.md, rules or skill files, and shows the diff. The plugin's own scripts, the Read/Grep/Glob tools, and read-only shell commands inside the project directory run without a prompt. In `dontAsk` mode edits are refused unless you allow `Edit`/`Write` in your own settings.
+
 When you run `/reflect`, Claude presents a summary table with options:
 - **Apply** - Accept the learning and add to CLAUDE.md
 - **Edit before applying** - Modify the learning text first

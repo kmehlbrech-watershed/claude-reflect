@@ -1,6 +1,6 @@
 ---
 description: Discover skill candidates from repeating session patterns
-allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TodoWrite
+allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_learnings.py" *)
 ---
 
 ## Arguments
@@ -95,10 +95,12 @@ prints; `session_files` is already limited to the last N days, newest first. Use
 
 With `--project <path>`, add `--project "<path>"` to the same command.
 
-If `--all-projects` is specified, list main session files one level down only (never deeper, which would include `subagents/`), skipping `agent-*` names (again with the `--days` value for `-mtime`):
+If `--all-projects` is specified, add `--all-projects` to the same command (again with the `--days` value):
 ```bash
-find ~/.claude/projects -mindepth 2 -maxdepth 2 -name "*.jsonl" ! -name "agent-*" -mtime -14 -type f 2>/dev/null
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" --all-projects --days 14
 ```
+Its `session_files` then lists main session files from every project folder,
+one level down only (never `subagents/`), skipping `agent-*` names, newest first.
 
 **Extract user messages using the existing script:**
 
@@ -119,17 +121,12 @@ The extraction script handles:
 
 ### Step 3b: Check Existing Commands
 
-Before analyzing patterns, discover what skills already exist:
+Before analyzing patterns, discover what skills already exist with the Glob
+tool (not shell `ls`, which prompts for paths under `~/.claude`):
+- Current project: `.claude/commands/*.md`
+- Global commands: `~/.claude/commands/*.md`
 
-```bash
-# Check current project
-ls .claude/commands/*.md 2>/dev/null | xargs -I{} basename {} .md
-
-# Check global commands
-ls ~/.claude/commands/*.md 2>/dev/null | xargs -I{} basename {} .md
-```
-
-Store the list of existing command names. During pattern analysis (Step 4), if a pattern's suggested name matches an existing command:
+Store the list of existing command names (file names without `.md`). During pattern analysis (Step 4), if a pattern's suggested name matches an existing command:
 - **Skip it** from the NEW candidates list
 - Show it in "Existing skills (patterns match)" section
 
@@ -247,13 +244,7 @@ Use AskUserQuestion to confirm or adjust assignments.
 
 ### Step 6: Generate Skill Files
 
-**Pre-flight checks:**
-```bash
-# Ensure .claude/commands exists for each target project
-for project in [list of target projects]; do
-  mkdir -p "$project/.claude/commands"
-done
-```
+The Write tool creates `.claude/commands/` if it is missing; no `mkdir` needed.
 
 For each approved skill candidate, generate a skill file in `.claude/commands/`:
 
@@ -290,17 +281,12 @@ For global skills: `~/.claude/commands/[skill-name].md`
 
 ### Step 6b: Validate Skills
 
-After generating each skill file, verify it works:
+After generating each skill file, verify it works by reading it back with the
+Read tool (`[project-path]/.claude/commands/[skill-name].md`):
 
-1. **File exists:**
-   ```bash
-   ls -la [project-path]/.claude/commands/[skill-name].md
-   ```
+1. **File exists:** the Read succeeds.
 
-2. **Has valid frontmatter:**
-   ```bash
-   head -5 [project-path]/.claude/commands/[skill-name].md
-   ```
+2. **Has valid frontmatter:** the first lines are a `---` block with `description:` and `allowed-tools:`.
 
 3. **Inform user:**
    > "Skill file created. Restart Claude Code session or start new conversation to see /[skill-name] in autocomplete."
