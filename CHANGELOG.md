@@ -5,6 +5,14 @@ All notable changes to claude-reflect will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Nested `claude -p` calls run with no tools, no MCP servers, no customizations and no saved session.** `semantic_detector` builds every call through one helper, `_run_claude`, which adds `--tools "" --strict-mcp-config --safe-mode --no-session-persistence`. The calls only classify text already in the prompt, and that text comes from transcripts, so they get no built-in tools (shell, files, web), no MCP servers, none of the user's CLAUDE.md, auto-memory, plugins, hooks or skills, and leave no transcript under `~/.claude/projects/` for `/reflect --scan-history` to mine later. `--safe-mode` keeps the normal Claude Code login, so subscription users are unaffected. This narrows what a prompt injected into a transcript can do through these calls; it does not stop such a prompt from steering the classifier's answer.
+- **Older Claude Code degrades one flag at a time, and says so.** If a call fails and the CLI's error names one of those flags, the helper drops only that flag, keeps every flag the CLI accepts, prints a one-line warning to stderr, and remembers the rejection for the rest of the process. A rejected `--tools` is replaced by `--disallowedTools` with the built-in tool names. Only if the CLI also rejects `--disallowedTools` do the calls run with tools, and the warning says so. Each retry drops a new flag, so the retries are bounded.
+- **The plugin's hooks stay quiet inside those calls.** The helper sets `CLAUDE_REFLECT_NESTED=1`; all four hook scripts return early when it is set, so classifier prompts (which contain `remember:`) are not captured back into the learnings queue, and reminders don't leak into the classifier's context. This also covers older Claude Code without `--safe-mode`, where plugin hooks still load.
+- 19 tests in `tests/test_nested_claude.py`, including one that fails if anything in `scripts/` runs `claude` or a subprocess outside `_run_claude`.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs

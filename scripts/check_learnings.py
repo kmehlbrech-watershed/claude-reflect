@@ -12,6 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.reflect_utils import (
+    in_nested_reflect_call,
     get_queue_path,
     get_backup_dir,
     load_queue,
@@ -23,6 +24,9 @@ from lib.reflect_utils import (
 def main() -> int:
     """Main entry point."""
     ensure_utf8_io()
+    # Our own nested `claude -p` (semantic_detector): not the user's session.
+    if in_nested_reflect_call():
+        return 0
     items = load_queue()
     if not items:
         return 0

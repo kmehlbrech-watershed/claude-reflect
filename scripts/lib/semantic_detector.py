@@ -5,12 +5,133 @@ Uses `claude -p` (print mode) to semantically analyze user messages
 and determine if they contain reusable learnings.
 """
 import json
+import os
+import re
 import subprocess
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Default timeout for Claude CLI calls (seconds)
 DEFAULT_TIMEOUT = 30
+
+# Set in the environment of every nested `claude -p` call. The plugin's own
+# hooks check it and stay quiet, so analysis prompts are not captured back
+# into the learnings queue and reminders don't leak into the classifier.
+NESTED_ENV_VAR = "CLAUDE_REFLECT_NESTED"
+
+# The nested calls only classify text that is already in the prompt, and that
+# text comes from transcripts (untrusted). They need no tools, no MCP servers,
+# none of the user's customizations, and no saved session, so they get none:
+#   --tools ""                  no built-in tools (no shell, files or web)
+#   --strict-mcp-config         no MCP servers (none are passed via --mcp-config)
+#   --safe-mode                 no CLAUDE.md, auto-memory, plugins, hooks, skills,
+#                               custom agents; login and model selection still work
+#   --no-session-persistence    no transcript under ~/.claude/projects/, which
+#                               /reflect --scan-history would otherwise mine
+# Each entry is one flag with its argv. `--tools` and `""` stay separate argv
+# elements so the empty string survives as its own argument.
+HARDENING_FLAGS = [
+    ("--tools", ["--tools", ""]),
+    ("--strict-mcp-config", ["--strict-mcp-config"]),
+    ("--safe-mode", ["--safe-mode"]),
+    ("--no-session-persistence", ["--no-session-persistence"]),
+]
+
+# Claude Code older than `--tools` still has `--disallowedTools`, so on those
+# versions the built-in tools are denied by name instead. Names a version does
+# not have are ignored by the CLI.
+BUILTIN_TOOLS = [
+    "Bash", "BashOutput", "KillShell", "KillBash", "PowerShell", "Monitor",
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "NotebookRead",
+    "Glob", "Grep", "LS", "WebFetch", "WebSearch",
+    "Task", "Agent", "TaskOutput", "TaskStop", "SendMessage", "ListAgents",
+    "TodoWrite", "TodoRead", "ExitPlanMode", "EnterPlanMode",
+    "SlashCommand", "Skill", "ToolSearch", "AskUserQuestion",
+    "ListMcpResourcesTool", "ReadMcpResourceTool",
+    "EnterWorktree", "ExitWorktree", "Workflow",
+    "CronCreate", "CronDelete", "CronList", "ScheduleWakeup", "RemoteTrigger",
+    "PushNotification", "PublishPlugin", "DesignSync", "ReportFindings",
+    "ShareOnboardingGuide",
+]
+DISALLOWED_TOOLS_FLAG = "--disallowedTools"
+
+# Flags the installed claude rejected, remembered for the rest of the process
+# so each one is probed once rather than on every call.
+_rejected_flags: set = set()
+
+
+def _claude_command(model: Optional[str], rejected=frozenset()) -> List[str]:
+    """The `claude -p` argv, with every hardening flag not in `rejected`."""
+    cmd = ["claude", "-p", "--output-format", "json"]
+    for flag, argv in HARDENING_FLAGS:
+        if flag not in rejected:
+            cmd.extend(argv)
+        elif flag == "--tools" and DISALLOWED_TOOLS_FLAG not in rejected:
+            cmd.extend([DISALLOWED_TOOLS_FLAG, ",".join(BUILTIN_TOOLS)])
+    if model:
+        cmd.extend(["--model", model])
+    return cmd
+
+
+def _flags_in(cmd: List[str]) -> List[str]:
+    hardening = {flag for flag, _ in HARDENING_FLAGS} | {DISALLOWED_TOOLS_FLAG}
+    return [arg for arg in cmd if arg in hardening]
+
+
+def _named_flag(stderr: str, flags: List[str]) -> Optional[str]:
+    """The first of `flags` that the CLI's error output names, if any."""
+    for flag in flags:
+        if re.search(r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])", stderr, re.IGNORECASE):
+            return flag
+    return None
+
+
+def _warn(message: str) -> None:
+    print(f"claude-reflect: {message}", file=sys.stderr)
+
+
+def _run_claude(prompt: str, model: Optional[str], timeout: int) -> subprocess.CompletedProcess:
+    """Run one nested `claude -p` call, hardened (see HARDENING_FLAGS), hooks muted.
+
+    Raises what subprocess.run raises (FileNotFoundError, TimeoutExpired);
+    callers already handle those. If the call fails and the CLI's error names
+    one of our flags (an older Claude Code that does not know it), retries
+    without only that flag, keeping every other one, prints a one-line warning
+    to stderr, and remembers the rejection for later calls. A rejected
+    `--tools ""` is replaced by `--disallowedTools <built-in tools>`.
+    """
+    env = {**os.environ, NESTED_ENV_VAR: "1"}
+    # Each retry drops one more flag, so this bounds the loop.
+    for _ in range(len(HARDENING_FLAGS) + 2):
+        cmd = _claude_command(model, _rejected_flags)
+        result = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+        if result.returncode == 0:
+            return result
+        stderr = result.stderr or ""
+        flag = _named_flag(stderr, _flags_in(cmd))
+        if flag is None:
+            if "unknown option" in stderr.lower():
+                _warn(f"nested claude -p rejected an option: {stderr.strip().splitlines()[0]}")
+            return result
+        _rejected_flags.add(flag)
+        if flag == "--tools":
+            _warn("this Claude Code does not accept --tools; denying built-in tools "
+                  "with --disallowedTools instead. Update Claude Code for full isolation.")
+        elif flag == DISALLOWED_TOOLS_FLAG:
+            _warn("this Claude Code accepts neither --tools nor --disallowedTools; "
+                  "classifier calls run WITH tools. Update Claude Code.")
+        else:
+            _warn(f"this Claude Code does not accept {flag}; classifier calls run "
+                  "without it. Update Claude Code for full isolation.")
+    return result
 
 # Default model for semantic analysis — uses a cost-effective model
 # to avoid burning expensive Opus tokens on classification tasks.
@@ -72,21 +193,9 @@ def semantic_analyze(
     # Build the prompt
     prompt = ANALYSIS_PROMPT.format(text=text.replace('"', '\\"'))
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        # Use DEFAULT_MODEL if no explicit model specified
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             # Claude CLI failed
@@ -305,21 +414,8 @@ def validate_tool_error(
         suggested_guideline=suggested_guideline or "No suggestion"
     )
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             return None
@@ -483,21 +579,8 @@ def detect_contradictions(
     entries_text = "\n".join(f"- {e}" for e in entries)
     prompt = CONTRADICTION_PROMPT.format(entries=entries_text)
 
-    # Build command — use DEFAULT_MODEL if no explicit model specified
-    effective_model = model or DEFAULT_MODEL
-    cmd = ["claude", "-p", "--output-format", "json"]
-    if effective_model:
-        cmd.extend(["--model", effective_model])
-
     try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
+        result = _run_claude(prompt, model or DEFAULT_MODEL, timeout)
 
         if result.returncode != 0:
             return []
