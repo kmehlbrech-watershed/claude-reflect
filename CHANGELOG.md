@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sturdier reply parsing.** JSON in the reply is found with a real decoder at each `{` (fenced blocks first), so braces inside string values, braces in surrounding prose and an echoed example object no longer break it; each call site asks for the object that has its own key (`is_learning`, `is_learnable`, `contradictions`). An error envelope with no `result` (e.g. `error_max_turns`) and a tool-error reply without `is_learnable` now count as no answer instead of a "no". `--verbose` / stream-json output is not supported and gives no answer.
 - The semantic analysis prompt's own text no longer contains the literal `remember:` marker (it describes it instead), with the same classification guidance. The message being analyzed can still contain it, so keeping nested `claude -p` prompts out of the capture hook is handled separately.
 
+- **Owner-only queue and backups.** `save_queue_at` writes `0600` files, and the PreCompact hook makes `~/.claude/learnings-backups/` `0700` and writes each backup through `save_queue_at` (atomic, owner-only) instead of copying the queue file. No-op where chmod is unsupported.
+- **Backups are pruned.** Only the newest 20 `pre-compact-*.json` files are kept; `CLAUDE_REFLECT_MAX_BACKUPS` changes the count, `0` keeps all. They used to accumulate forever.
+- **Retention advice no longer suggests `cleanupPeriodDays: 99999`.** The SessionStart warning and README suggest 90 days and point to the user's data-retention policy, since transcripts can hold secrets and customer data.
+- 8 tests in `tests/test_private_storage.py`.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs

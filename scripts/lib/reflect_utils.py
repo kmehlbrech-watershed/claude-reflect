@@ -110,6 +110,19 @@ def load_queue_at(path: Path) -> List[Dict[str, Any]]:
         return []
 
 
+def make_private(path: Path, mode: int = 0o600) -> None:
+    """Restrict a file (0o600) or directory (0o700) to its owner.
+
+    Queues and backups hold the user's own prompts verbatim. Best effort: a
+    no-op where chmod is unsupported (Windows ignores everything but the
+    read-only bit).
+    """
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
 def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     """Write a queue to an explicit path, atomically.
 
@@ -122,6 +135,7 @@ def save_queue_at(path: Path, items: List[Dict[str, Any]]) -> None:
     tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
         tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        make_private(tmp)
         tmp.replace(path)
     finally:
         try:
@@ -208,6 +222,39 @@ def in_nested_reflect_call() -> bool:
 def get_backup_dir() -> Path:
     """Get path to learnings backup directory."""
     return Path.home() / ".claude" / "learnings-backups"
+
+
+DEFAULT_MAX_BACKUPS = 20
+
+
+def get_max_backups() -> int:
+    """How many pre-compact backups to keep; CLAUDE_REFLECT_MAX_BACKUPS, 0 = all."""
+    raw = os.environ.get("CLAUDE_REFLECT_MAX_BACKUPS", "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_BACKUPS
+    return value if value >= 0 else DEFAULT_MAX_BACKUPS
+
+
+def prune_backups(backup_dir: Path, keep: int) -> int:
+    """Delete all but the newest `keep` pre-compact backups. Returns how many went.
+
+    Only files this plugin writes (pre-compact-*.json) are touched. Their
+    names sort by time (see backup_timestamp), so no stat calls are needed.
+    keep <= 0 keeps everything.
+    """
+    if keep <= 0 or not backup_dir.is_dir():
+        return 0
+    backups = sorted(backup_dir.glob("pre-compact-*.json"))
+    removed = 0
+    for old in backups[:-keep]:
+        try:
+            old.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def get_claude_dir() -> Path:

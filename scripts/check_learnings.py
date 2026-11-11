@@ -13,11 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.reflect_utils import (
     in_nested_reflect_call,
-    get_queue_path,
     get_backup_dir,
+    get_max_backups,
     load_queue,
     backup_timestamp,
     ensure_utf8_io,
+    make_private,
+    prune_backups,
+    save_queue_at,
 )
 
 
@@ -31,18 +34,18 @@ def main() -> int:
     if not items:
         return 0
 
-    queue_path = get_queue_path()
-
-    # Create backup directory if needed
+    # Create backup directory if needed; it holds prompts, so owner-only.
     backup_dir = get_backup_dir()
     backup_dir.mkdir(parents=True, exist_ok=True)
+    make_private(backup_dir, 0o700)
 
-    # Save backup with timestamp
+    # Save backup with timestamp. save_queue_at writes atomically and
+    # owner-only, the same way the queue itself is written.
     backup_file = backup_dir / f"pre-compact-{backup_timestamp()}.json"
-    backup_file.write_text(
-        queue_path.read_text(encoding="utf-8") if queue_path.exists() else "[]",
-        encoding="utf-8",
-    )
+    save_queue_at(backup_file, items)
+
+    # Backups used to accumulate forever; keep the newest few.
+    prune_backups(backup_dir, get_max_backups())
 
     # Output informational message (non-blocking)
     print()
