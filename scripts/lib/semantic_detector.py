@@ -156,7 +156,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 Guidelines:
 - correction: User telling AI to do something differently ("use X not Y", "don't use Z")
 - positive: User affirming good behavior ("perfect!", "exactly right", "great approach")
-- explicit: User explicitly asking to remember ("remember: ...", "always do X")
+- explicit: User explicitly asking to remember (an explicit "remember" marker followed by a colon, "always do X")
 - is_learning=true only if it's reusable across sessions (not one-time task instructions)
 - confidence: How certain this is a genuine, reusable learning (0.6+ to be useful)
 - extracted_learning: Should be actionable and concise (e.g., "Use gpt-5.1 for reasoning tasks")
@@ -206,20 +206,9 @@ def semantic_analyze(
         if not output:
             return None
 
-        # Claude -p --output-format json wraps the response
-        # Try to extract the actual JSON from the response
-        try:
-            response = json.loads(output)
-            # If it's wrapped in a "result" field, extract it
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            # Try to find JSON in the output
-            content = _extract_json_from_text(output)
-            if content is None:
-                return None
+        content = _parse_cli_output(output, expected_key="is_learning")
+        if content is None:
+            return None
 
         # Validate and normalize the response
         return _validate_response(content)
@@ -233,26 +222,75 @@ def semantic_analyze(
         return None
 
 
-def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """Try to extract JSON from text that may have surrounding content."""
-    # Find JSON object boundaries
-    start = text.find('{')
-    if start == -1:
-        return None
+_FENCE_RE = re.compile(r"```[ \t]*(?:json)?[ \t]*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
 
-    # Find matching closing brace
-    depth = 0
-    for i, char in enumerate(text[start:], start):
-        if char == '{':
-            depth += 1
-        elif char == '}':
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(text[start:i+1])
-                except json.JSONDecodeError:
-                    return None
+
+def _extract_json_from_text(
+    text: str, expected_key: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Find the JSON object answer in text that may have prose around it.
+
+    Fenced (```json) blocks are searched first, then the whole text. Every
+    `{` is tried with a real JSON decoder, so braces inside string values,
+    stray braces in prose ("mentions {foo}") and invalid template echoes do
+    not derail the search. With `expected_key`, the first object that has
+    that key wins, so an example object echoed before the answer is skipped;
+    without it, the first object that decodes wins.
+    """
+    if not isinstance(text, str):
+        return None
+    decoder = json.JSONDecoder()
+    regions = [m.group(1) for m in _FENCE_RE.finditer(text)] + [text]
+    for region in regions:
+        start = region.find("{")
+        while start != -1:
+            try:
+                obj, _ = decoder.raw_decode(region, start)
+            except json.JSONDecodeError:
+                obj = None
+            if isinstance(obj, dict) and (expected_key is None or expected_key in obj):
+                return obj
+            start = region.find("{", start + 1)
     return None
+
+
+def _parse_cli_output(output: str, expected_key: Optional[str] = None) -> Optional[Any]:
+    """The model's JSON answer from `claude -p --output-format json` stdout.
+
+    That stdout is an envelope like {"type": "result", "is_error": false,
+    "result": "<the model's reply as text>", ...}: the reply is a string,
+    often JSON wrapped in a ```json fence. Unwrap the envelope, then parse
+    the reply (see _extract_json_from_text for `expected_key`). Plain JSON
+    on stdout (older CLIs, tests) is accepted as-is.
+
+    Returns None when nothing parses, the CLI reports an error
+    (`is_error: true`), or the envelope has no `result` (for example
+    `"subtype": "error_max_turns"`). Other output formats (`--verbose`
+    arrays, stream-json lines) are not supported and also give None.
+    """
+    try:
+        response = json.loads(output)
+    except json.JSONDecodeError:
+        return _extract_json_from_text(output, expected_key)
+
+    if isinstance(response, dict):
+        if response.get("is_error"):
+            return None
+        if response.get("type") == "result" or "result" in response:
+            if "result" not in response:
+                return None
+            content = response["result"]
+        else:
+            content = response
+    elif isinstance(response, list):
+        # `--verbose` prints an array of messages; not supported.
+        return None
+    else:
+        content = response
+
+    if isinstance(content, str):
+        return _extract_json_from_text(content, expected_key)
+    return content
 
 
 def _validate_response(content: Any) -> Optional[Dict[str, Any]]:
@@ -292,6 +330,13 @@ def _validate_response(content: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _is_explicit_item(item: dict) -> bool:
+    """An explicit user request: never dropped on the model's say-so."""
+    if item.get("type") == "explicit":
+        return True
+    return "remember:" in str(item.get("message", "")).lower()
+
+
 def validate_queue_items(
     items: list,
     timeout: int = DEFAULT_TIMEOUT,
@@ -300,8 +345,10 @@ def validate_queue_items(
     """
     Validate a list of queue items using semantic analysis.
 
-    Items that fail semantic validation are filtered out.
-    Items that pass have their confidence updated.
+    Items that fail semantic validation are filtered out, except explicit
+    requests (type "explicit" or a "remember:" marker in the message), which
+    are always kept, as /reflect promises. Items that are kept get the
+    semantic fields merged in and their confidence updated.
 
     Args:
         items: List of queue items from learnings-queue.json
@@ -326,7 +373,7 @@ def validate_queue_items(
             validated.append(item)
             continue
 
-        if not result.get("is_learning"):
+        if not result.get("is_learning") and not _is_explicit_item(item):
             # Semantic says it's not a learning - filter out
             continue
 
@@ -424,23 +471,15 @@ def validate_tool_error(
         if not output:
             return None
 
-        # Parse JSON response
-        try:
-            response = json.loads(output)
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            content = _extract_json_from_text(output)
-            if content is None:
-                return None
-
-        # Validate response
-        if not isinstance(content, dict):
+        content = _parse_cli_output(output, expected_key="is_learnable")
+        if content is None:
             return None
 
-        is_learnable = content.get("is_learnable", False)
+        # Validate response: no verdict means no answer, not a "no"
+        if not isinstance(content, dict) or "is_learnable" not in content:
+            return None
+
+        is_learnable = content.get("is_learnable")
         if isinstance(is_learnable, str):
             is_learnable = is_learnable.lower() in ("true", "yes", "1")
 
@@ -589,17 +628,9 @@ def detect_contradictions(
         if not output:
             return []
 
-        # Parse JSON response
-        try:
-            response = json.loads(output)
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            content = _extract_json_from_text(output)
-            if content is None:
-                return []
+        content = _parse_cli_output(output, expected_key="contradictions")
+        if content is None:
+            return []
 
         # Extract contradictions
         if not isinstance(content, dict):
