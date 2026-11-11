@@ -14,6 +14,10 @@ Options:
     --project DIR       Scan all sessions for a specific project directory
     --all               Scan all sessions across all projects
     --json              Output as JSON instead of human-readable format
+    --validate          Run semantic validation (claude -p) on the aggregated
+                        patterns; adds refined_guideline and drops patterns
+                        it judges not learnable
+    --model MODEL       Model for --validate
 """
 import sys
 import os
@@ -98,6 +102,16 @@ def main() -> int:
         action="store_true",
         help="Output as JSON"
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate aggregated patterns with semantic analysis (claude -p)"
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Model for --validate"
+    )
 
     args = parser.parse_args()
 
@@ -136,6 +150,9 @@ def main() -> int:
 
     # Aggregate by error type
     aggregated = aggregate_tool_errors(all_errors, min_occurrences=args.min_count)
+    if aggregated and args.validate:
+        from lib.semantic_detector import validate_tool_errors
+        aggregated = validate_tool_errors(aggregated, model=args.model)
 
     if not aggregated:
         if args.json:
@@ -154,6 +171,8 @@ def main() -> int:
 
         for agg in aggregated:
             print(f"[{agg['error_type']}] - {agg['count']} occurrences (confidence: {agg['confidence']:.2f})")
+            if agg.get('refined_guideline'):
+                print(f"  Refined guideline: {agg['refined_guideline']}")
             if agg['suggested_guideline']:
                 print(f"  Suggested guideline: {agg['suggested_guideline']}")
             print(f"  Sample error:")

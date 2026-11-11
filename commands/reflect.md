@@ -1,6 +1,6 @@
 ---
 description: Reflect on session corrections and update CLAUDE.md (with human review)
-allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_learnings.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_rejections.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_errors.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clear_queue.py" *)
+allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_learnings.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_rejections.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_errors.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clear_queue.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/semantic_check.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" *)
 ---
 
 ## Arguments
@@ -20,7 +20,7 @@ allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLA
 - Global CLAUDE.md: @~/.claude/CLAUDE.md
 - Learnings queue (per-project): !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" 2>/dev/null || echo "[]"`
 - Current project: !`pwd`
-- AGENTS.md sync (env): !`printf '%s\n' "${CLAUDE_REFLECT_AGENTS_MD:-off}"`
+- AGENTS.md sync (env): !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" --agents-md-env`
 
 ## Multi-Target Export
 
@@ -43,32 +43,21 @@ Claude-reflect syncs learnings to CLAUDE.md files (including subdirectories), sk
 
 **Target Discovery:**
 
-Use the Python utility to find all memory tier files:
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.reflect_utils import find_claude_files
-files = find_claude_files()
-# Returns list of {path, relative_path, type, frontmatter}
-# Types: 'global', 'root', 'local', 'subdirectory', 'rule', 'user-rule', 'referenced'
-# 'referenced' files are docs reachable from memory files via @-includes or
-# markdown links; they include 'referenced_from' and 'depth' fields.
-# A referenced AGENTS.md (any directory) has 'agents_md': True: it is NOT a
-# routing target. Only Step 7c writes ./AGENTS.md, and only when sync is on.
-```
-
-Or discover manually:
+Use the bundled script to find all memory tier files (run it from the project directory):
 ```bash
-# Find all CLAUDE.md files (excluding node_modules, .git, venv, etc.)
-find . -name "CLAUDE.md" -type f \
-  -not -path "*/node_modules/*" \
-  -not -path "*/.git/*" \
-  -not -path "*/venv/*" \
-  -not -path "*/.venv/*"
-# Also check rule files and local
-ls .claude/rules/*.md 2>/dev/null
-ls CLAUDE.local.md 2>/dev/null
-ls ~/.claude/rules/*.md 2>/dev/null
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py"
 ```
+It prints `find_claude_files()` as a JSON list of `{path, relative_path, type, lines, frontmatter}`:
+- Types: `global`, `root`, `local`, `subdirectory`, `rule`, `user-rule`, `referenced`.
+- `referenced` files are docs reachable from memory files via @-includes or
+  markdown links; they include `referenced_from` and `depth` fields.
+- A referenced AGENTS.md (any directory) has `agents_md: true`: it is NOT a
+  routing target. Only Step 7c writes ./AGENTS.md, and only when sync is on.
+
+If the script fails, discover them with the Glob tool instead (`**/CLAUDE.md`,
+skipping `node_modules`, `.git`, `venv` and `.venv`; `.claude/rules/*.md`;
+`CLAUDE.local.md`; and `~/.claude/rules/*.md`). Don't use shell `find`/`ls`
+for this: shell reads outside the project directory prompt for permission.
 
 **Target Selection (Hierarchy-Aware Routing):**
 - **Guardrail corrections** ("don't do X") → `.claude/rules/guardrails.md`
@@ -163,31 +152,18 @@ Detect and display all AI assistant config files with **line counts** and **size
 
 **Detection Steps:**
 
-1. Find all memory tier files using `find_claude_files()` (discovers CLAUDE.md, CLAUDE.local.md, rule files)
-2. Count lines in each file
-3. Check for auto memory directory
-4. Check for `./AGENTS.md` directly: `find_claude_files()` only lists it when a
-   memory file references it, so run `test -f AGENTS.md && wc -l < AGENTS.md`.
+1. Find all memory tier files and their line counts (`lines`) with
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py"` (discovers CLAUDE.md, CLAUDE.local.md, rule files)
+2. Check for the auto memory directory: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --auto-memory`
+   (`exists`, and `files` with each file's `name` and `entries`)
+3. Check for `./AGENTS.md` directly: `memory_tiers.py` only lists it when a
+   memory file references it, so use `agents_md.exists` and `agents_md.lines`
+   from `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py"`.
    Show the sync state next to it (`on` if `--agents-md` was passed or the
    "AGENTS.md sync (env)" context line is `true` in any case, else `off`).
-5. Display with status indicator:
+4. Display with status indicator:
    - `✓` = under 150 lines (healthy)
    - `⚠️` = over 150 lines (consider cleanup)
-
-```python
-# Cross-platform line counting (works on Windows, macOS, Linux)
-from pathlib import Path
-
-def count_lines(filepath):
-    try:
-        return len(Path(filepath).expanduser().read_text().splitlines())
-    except:
-        return 0
-
-# Example usage
-count_lines("~/.claude/CLAUDE.md")
-count_lines("./CLAUDE.md")
-```
 
 **Display format:**
 ```
@@ -248,8 +224,12 @@ Exit after showing targets (don't process learnings).
 Show learnings with their confidence and decay status:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" | jq -r '.[] | "\(.timestamp) | conf:\(.confidence // 0.5) | decay:\(.decay_days // 90)d | \(.message | .[0:60])"'
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" --summary
 ```
+
+It prints one object per item: `timestamp`, `age`, `confidence`, `decay_days`,
+`patterns`, `type` and `message`. Show `confidence` as 0.5 and `decay_days` as
+90 when they are null, and the first 60 characters of `message`.
 
 Display table of learnings with decay status:
 ```
@@ -277,28 +257,21 @@ Exit after showing review (don't process learnings).
 
 Scan existing CLAUDE.md files for similar entries AND contradictions.
 
-**1. Read both CLAUDE.md files:**
-```bash
-cat ~/.claude/CLAUDE.md
-cat CLAUDE.md 2>/dev/null
-```
+**1. Read both CLAUDE.md files** with the Read tool: `~/.claude/CLAUDE.md` and
+`./CLAUDE.md` (if it exists).
 
 **2. Extract all bullet points:**
 Look for lines starting with `- ` under section headers. Track line numbers.
 
 **3. Detect contradictions using semantic analysis:**
 
-Use the contradiction detector to find conflicting entries:
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.semantic_detector import detect_contradictions
-
-# Collect all entries from both files
-entries = [...]  # List of bullet point strings
-
-contradictions = detect_contradictions(entries)
-# Returns: [{"entry1": "...", "entry2": "...", "conflict": "reason"}]
+Use the contradiction detector to find conflicting entries. It collects the
+`- ` bullets from both files itself (add `--model MODEL` only if the user passed `--model`):
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --contradictions
 ```
+It prints `{"entries": [{file, line, text}], "contradictions": [{"entry1", "entry2", "conflict"}]}`.
+`contradictions` is empty when none are found or the Claude CLI failed.
 
 **4. Analyze for semantic similarity:**
 Group entries that:
@@ -397,14 +370,14 @@ Analyze the full memory hierarchy and suggest reorganization to reduce clutter a
 
 **1. Inventory all memory locations:**
 
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.reflect_utils import find_claude_files, read_auto_memory, read_all_memory_entries
-
-files = find_claude_files()
-auto_memory = read_auto_memory()
-all_entries = read_all_memory_entries()
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --auto-memory
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --entries
 ```
+
+These print the memory files (with `lines`), the auto memory files, and every
+bullet entry across tiers as `{text, source_file, source_type, line_number}`.
 
 Count lines, entries, and files for each tier. An AGENTS.md that shows up as a
 referenced doc (`agents_md: True`) is read-only here: count and report its
@@ -481,26 +454,21 @@ Use AskUserQuestion for each proposed reorganization:
 
 ### First-Run Detection (Per-Project)
 
-Check if /reflect has been run in THIS project before. Run these commands separately:
-
-**WARNING**: Do NOT combine these into a single compound command with `$(...)`. Claude Code's bash executor mangles subshell syntax. Run each command individually and manually substitute the result.
-
-1. Get the project folder from the resolver, not from a `grep` over
-   `~/.claude/projects`. That grep matches on basename, so for a project at
-   `…/darwin_new` it finds the stale `-…-darwin_new` folder rather than the
-   real `-…-darwin-new` one, and every later step then reads the wrong place:
+Check if /reflect has been run in THIS project before. Get the project folder
+from the resolver, not from a `grep` over `~/.claude/projects`. That grep
+matches on basename, so for a project at `…/darwin_new` it finds the stale
+`-…-darwin_new` folder rather than the real `-…-darwin-new` one, and every
+later step then reads the wrong place:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py"
 ```
 
-2. Check if initialized, using `session_dir` from that JSON:
+Its `initialized` field is `true` if `<session_dir>/.reflect-initialized`
+exists. Don't check the marker with a shell `test -f`: shell reads under
+`~/.claude` prompt for permission.
 
-```bash
-test -f "<session_dir>/.reflect-initialized" && echo "initialized" || echo "first-run"
-```
-
-**If "first-run" for this project AND user did NOT pass `--scan-history`:**
+**If `initialized` is `false` (first run in this project) AND user did NOT pass `--scan-history`:**
 
 Use AskUserQuestion to recommend historical scan:
 ```json
@@ -541,13 +509,16 @@ Decide this once, here. Steps 4, 6, 7c and 9 only read the result.
 1. Sync is *requested* if `--agents-md` was passed, or the "AGENTS.md sync (env)"
    context line is `true` (any case). Any other value (`off`, `1`, `yes`, empty)
    means not requested.
-2. Check the file: `test -f AGENTS.md && echo found || echo missing`
-3. If requested and found, check whether `./CLAUDE.md` already brings AGENTS.md
-   into Claude's context (skip both if `./CLAUDE.md` doesn't exist):
-   ```bash
-   grep -nE '(^|[^[:alnum:]_.])@(\./)?AGENTS\.md' CLAUDE.md
-   python3 -c "import os; print(os.path.samefile('CLAUDE.md', 'AGENTS.md'))"
-   ```
+2. Check the file and whether `./CLAUDE.md` already brings AGENTS.md into
+   Claude's context, from the `agents_md` object that
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py"` prints:
+   - `exists`: `./AGENTS.md` is a file (found / missing).
+   - `same_file_as_claude_md`: `./CLAUDE.md` and `./AGENTS.md` are the same
+     file (symlink or hard link).
+   - `claude_md_include_lines`: line numbers in `./CLAUDE.md` that `@`-include
+     AGENTS.md (`@AGENTS.md` or `@./AGENTS.md`, not preceded by a letter,
+     digit, `_` or `.`). Empty when there are none.
+   (Both checks are `false`/empty when either file is missing.)
 
 Record exactly one state, and its note (if any):
 
@@ -556,8 +527,8 @@ Record exactly one state, and its note (if any):
 | `on` | requested, found, neither check matched | Steps 4, 6 and 7c handle AGENTS.md. No note. |
 | `off` | not requested | Never write AGENTS.md. If found, note: `AGENTS.md found - not updated (use --agents-md to sync project learnings)` |
 | `missing` | requested, not found | Never create it. Note: `AGENTS.md sync requested, but ./AGENTS.md does not exist - not created` |
-| `same-file` | `samefile` printed `True` (symlink or hard link) | Skip 7c: anything written to ./CLAUDE.md is already in AGENTS.md. Note: `AGENTS.md is the same file as CLAUDE.md - project learnings reach it through CLAUDE.md` |
-| `included` | the grep matched (and not `same-file`) | Skip 7c: Claude already loads AGENTS.md through the include, so a copy would put each learning in its context twice. Note: `AGENTS.md sync skipped - ./CLAUDE.md @-includes AGENTS.md, so copies would load twice in Claude. Learnings went to CLAUDE.md only; move any that other tools need into AGENTS.md by hand.` |
+| `same-file` | requested, found, and `same_file_as_claude_md` is `true` | Skip 7c: anything written to ./CLAUDE.md is already in AGENTS.md. Note: `AGENTS.md is the same file as CLAUDE.md - project learnings reach it through CLAUDE.md` |
+| `included` | requested, found, `claude_md_include_lines` is not empty (and not `same-file`) | Skip 7c: Claude already loads AGENTS.md through the include, so a copy would put each learning in its context twice. Note: `AGENTS.md sync skipped - ./CLAUDE.md @-includes AGENTS.md, so copies would load twice in Claude. Learnings went to CLAUDE.md only; move any that other tools need into AGENTS.md by hand.` |
 
 Show the note in the Step 6 summary, and print it as the last line on every way
 out of /reflect: Step 9, `--dry-run`, "Skip all", and "Cancel".
@@ -751,31 +722,19 @@ Tool execution errors (`is_error: true`) that indicate project-specific issues:
 - Global Claude behavior (bash quoting, EISDIR directory confusion)
 - One-off errors (only include patterns with 2+ occurrences)
 
-**Use the extraction script:**
+**Use the extraction script**, with the literal "Current project:" path from
+Context in place of `<project>` (not `$(pwd)`):
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_errors.py" --project "$(pwd)" --min-count 2 --json
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_errors.py" --project "<project>" --min-count 2 --json
 ```
 
-Or use the utility functions directly:
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.reflect_utils import extract_tool_errors, aggregate_tool_errors
+It extracts project-specific tool errors from the project's session files and
+keeps patterns with 2+ occurrences.
 
-# Extract from session files
-errors = []
-for session_file in session_files:
-    errors.extend(extract_tool_errors(session_file, project_specific_only=True))
-
-# Aggregate by pattern (only keep 2+ occurrences)
-aggregated = aggregate_tool_errors(errors, min_occurrences=2)
-```
-
-**Semantic validation (optional):**
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.semantic_detector import validate_tool_errors
-validated = validate_tool_errors(aggregated)
-```
+**Semantic validation (optional):** add `--validate` to the same command (and
+`--model MODEL` only if the user passed `--model`). Each pattern then also has
+`refined_guideline`; patterns judged not learnable are dropped, and patterns
+whose check failed are kept unchanged.
 
 **Add validated error patterns to working list:**
 - Mark source as "tool-error"
@@ -878,12 +837,12 @@ Scan auto memory for entries that may deserve "promotion" to CLAUDE.md, and rout
 
 **1.6a. Check auto memory for promotion candidates:**
 
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.reflect_utils import read_auto_memory
-auto_entries = read_auto_memory()
-# Look for entries that have been validated by repeated use
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --auto-memory
 ```
+
+Look in its `files` (each `{file, name, entries}`) for entries that have been
+validated by repeated use.
 
 If auto memory entries exist, scan for patterns that appear in multiple topic files or have been manually confirmed — these are candidates for promotion to CLAUDE.md.
 
@@ -1126,13 +1085,11 @@ Paths to search:
 - Auto memory: `memory_dir` from `project_paths.py`
 
 Or use the cross-tier deduplication utility:
-```python
-import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-from lib.reflect_utils import read_all_memory_entries
-entries = read_all_memory_entries()
-# Returns [{text, source_file, source_type, line_number}, ...]
-# Search entries for semantic similarity to each learning
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --entries
 ```
+It prints `[{text, source_file, source_type, line_number}, ...]`; search those
+entries for semantic similarity to each learning.
 
 If duplicate found:
 - Show: "⚠️ SIMILAR in [source_type] [source_file]: Line [N]: [content]"
@@ -1450,14 +1407,14 @@ For learnings routed to `.claude/rules/*.md`:
 
 For learnings routed to auto memory (typically confidence 0.60-0.74):
 
-1. Use `suggest_auto_memory_topic()` to determine filename:
-   ```python
-   import sys; sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")  # bundled, not cwd-relative
-   from lib.reflect_utils import suggest_auto_memory_topic, get_auto_memory_path
-   topic = suggest_auto_memory_topic(learning_text)  # e.g., "model-preferences"
-   memory_dir = get_auto_memory_path()
-   ```
-2. Create memory directory if missing: `memory_dir.mkdir(parents=True, exist_ok=True)`
+1. Determine the filename the way `suggest_auto_memory_topic()` does. Get the
+   keyword lists with
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_tiers.py" --topics`; the topic
+   is the one with the most keywords found in the lowercased learning (first
+   listed wins a tie), or `general` if none match (e.g. `model-preferences`).
+   Don't pass the learning to a shell command to compute this.
+2. The directory is `memory_dir` from `project_paths.py`. The Write tool
+   creates it if it is missing.
 3. Write/append to topic file (`{topic}.md`) in markdown format:
    ```markdown
    # Model Preferences
@@ -1574,10 +1531,11 @@ End with the AGENTS.md note from Step 0, if any.
 ### Step 10: Mark Initialized (Per-Project)
 
 Create marker file for THIS project so first-run detection won't trigger again.
-Use `session_dir` from `project_paths.py`, never a folder name found by grep:
+`--mark-initialized` creates `<session_dir>/.reflect-initialized` in the folder
+the resolver computes, never a folder name found by grep:
 
 ```bash
-touch "<session_dir>/.reflect-initialized"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" --mark-initialized
 ```
 
 ## Formatting Rules
