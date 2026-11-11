@@ -5,9 +5,9 @@ Cross-platform compatible (Windows, macOS, Linux).
 This script is called by Claude Code's PreCompact hook to back up
 the learnings queue before context is compacted.
 """
+import json
 import sys
 import os
-import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

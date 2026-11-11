@@ -102,14 +102,21 @@ def queue_path_for_folder(project_folder: Path) -> Path:
 
 
 def load_queue_at(path: Path) -> List[Dict[str, Any]]:
-    """Read a queue from an explicit path. No migration, no encoding."""
+    """Read a queue from an explicit path. No migration, no encoding.
+
+    Messages come back redacted, so every reader (the session-start
+    reminder, read_queue.py feeding /reflect, the PreCompact backup) gets
+    scrubbed text even from a queue written before redaction existed.
+    """
     if not path.exists():
         return []
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
-        return loaded if isinstance(loaded, list) else []
     except (ValueError, IOError, OSError):
         return []
+    if not isinstance(loaded, list):
+        return []
+    return [_redact_queue_item(item) for item in loaded]
 
 
 def make_private(path: Path, mode: int = 0o600) -> None:
@@ -237,7 +244,7 @@ def migrate_global_queue() -> None:
             # Merge with any existing project queue
             existing = load_queue_at(project_queue_path)
             existing.extend(project_items)
-            # Atomic and owner-only, like every other queue write.
+            # save_queue_at redacts, and writes atomically and owner-only.
             save_queue_at(project_queue_path, existing)
         except Exception:
             continue
@@ -1074,10 +1081,18 @@ def migrate_legacy_project_folder(project_dir: Optional[str] = None) -> None:
 
 
 def _queue_item_key(item: Any) -> Tuple[str, str]:
-    """Identity of a queue item for de-duplication during migration."""
+    """Identity of a queue item for de-duplication during migration.
+
+    The message is compared in its redacted form: the current queue was
+    saved redacted while a legacy one may still hold the raw text, and
+    comparing raw to redacted would keep both copies.
+    """
     if not isinstance(item, dict):
         return ("", "")
-    return (str(item.get("timestamp", "")), str(item.get("message", "")))
+    message = item.get("message", "")
+    if isinstance(message, str):
+        message = redact_secrets(message)
+    return (str(item.get("timestamp", "")), str(message))
 
 
 # Claude Code caps a project folder name at this many characters; past it the
@@ -1302,13 +1317,7 @@ def load_queue(project_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     # Migrate a folder left behind by the pre-3.2 path encoder
     migrate_legacy_project_folder(project_dir)
 
-    path = get_queue_path(project_dir)
-    if not path.exists():
-        return []
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, IOError):
-        return []
+    return load_queue_at(get_queue_path(project_dir))
 
 
 def save_queue(items: List[Dict[str, Any]], project_dir: Optional[str] = None) -> None:

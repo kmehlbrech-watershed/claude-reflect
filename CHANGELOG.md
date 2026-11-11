@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The capture hook's confirmation line prints the redacted text.
 - 14 tests in `tests/test_redact.py`.
 
+- **Secret redaction in the Python plugin** (`scripts/lib/redact.py`). Secret-shaped text is replaced with `[REDACTED]`; only the secret is masked, so the learning stays readable. Opt out with `CLAUDE_REFLECT_REDACT=false`.
+  - Where: `create_queue_item`, every `save_queue_at`, and every `load_queue` / `load_queue_at`, so the session-start reminder, `read_queue.py` (what `/reflect` and `/view-queue` see) and the capture hook's confirmation line print redacted text even from a queue written by an older version. The PreCompact backup writes the redacted items instead of copying the queue file's bytes. The legacy global-queue migration now saves through `save_queue_at`, and the legacy-folder migration de-duplicates on the redacted message so raw and redacted copies of one item are not both kept. The session extractors redact the messages and rejections they return, and tool-error samples are redacted before truncation.
+  - What: reflect-mod's `SECRET` patterns, plus passwords in `scheme://user:password@host` (empty user and `@` in the password included), `Bearer <token>`, JSON-quoted keys, env-style keys ending in a secret word (`AWS_SECRET_ACCESS_KEY`, `JWT_SECRET`, `DB_PASS`, `PWD`), whole quoted passphrases, and `ASIA` AWS key ids.
+  - Tuned for precision, since the output can become a CLAUDE.md rule: a value after a secret key must look secret (digit, symbol, or a quoted password or passphrase; not a type, boolean, number, reference, path or URL), and the bare `X is Y` form needs a quoted or digit-containing value, so `the API key is loaded from .env`, `token: string`, `secret=True` and `max_token=4096` are left alone. Long tokens exclude hex (git SHAs), UUIDs, slugs such as model ids, path segments and file names. Bare `sk`/`pk`/`rk` prefixes need a random-looking remainder (`pk_orders_customer_id` is kept). Linear on ~1 MB inputs.
+  - Not retroactive: backups already in `~/.claude/learnings-backups/` are not rewritten. The deprecated `scripts/legacy/` bash scripts do not redact.
+- Tests in `tests/test_redact.py` cover masked and untouched examples, idempotence, 1 MB inputs, the queue readers, the backup and both migrations.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs
