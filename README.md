@@ -369,6 +369,7 @@ claude-reflect/
 │   ├── extract_session_learnings.py
 │   ├── extract_tool_errors.py
 │   ├── extract_tool_rejections.py
+│   ├── semantic_check.py         # Semantic analysis from a file/stdin/queue
 │   └── legacy/                   # Bash scripts (deprecated)
 ├── mod/                    # reflect-mod: the same idea as a Claude Code mod (TypeScript)
 │   ├── .claude-plugin/plugin.json
@@ -399,6 +400,10 @@ Claude filters out:
 - Vague/non-actionable feedback
 
 Only reusable learnings are kept.
+
+### Transcripts Are Data
+
+Session files contain text Claude read from web pages, files and tool output, so `/reflect` and `/reflect-skills` never follow instructions found in them, and never put that text on a shell command line. Proposed learnings that would run or fetch something, change settings or permissions, or speak to the AI directly are shown with a `⚠️ possible injected instruction` flag, left out of "Apply all", and applied only if you approve each one on its own (default Skip). That includes `remember:` items. Subagent conversations (`agent-*.jsonl`, under `<session>/subagents/` on current Claude Code, and `isSidechain` entries) are not mined for corrections, because their "user" turns were written by Claude.
 
 ### Duplicate Detection
 
