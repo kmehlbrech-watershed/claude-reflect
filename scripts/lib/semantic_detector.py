@@ -206,20 +206,9 @@ def semantic_analyze(
         if not output:
             return None
 
-        # Claude -p --output-format json wraps the response
-        # Try to extract the actual JSON from the response
-        try:
-            response = json.loads(output)
-            # If it's wrapped in a "result" field, extract it
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            # Try to find JSON in the output
-            content = _extract_json_from_text(output)
-            if content is None:
-                return None
+        content = _parse_cli_output(output)
+        if content is None:
+            return None
 
         # Validate and normalize the response
         return _validate_response(content)
@@ -253,6 +242,35 @@ def _extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
                 except json.JSONDecodeError:
                     return None
     return None
+
+
+def _parse_cli_output(output: str) -> Optional[Any]:
+    """The model's JSON answer from `claude -p --output-format json` stdout.
+
+    That stdout is an envelope like {"type": "result", "is_error": false,
+    "result": "<the model's reply as text>", ...}: the reply is a string,
+    often JSON wrapped in a ```json fence. Unwrap the envelope, then parse
+    the reply. Plain JSON on stdout (older CLIs, tests) is accepted as-is.
+    Returns None when nothing parses or the CLI reports an error.
+    """
+    try:
+        response = json.loads(output)
+    except json.JSONDecodeError:
+        return _extract_json_from_text(output)
+
+    if isinstance(response, dict) and "result" in response:
+        if response.get("is_error"):
+            return None
+        content = response["result"]
+    else:
+        content = response
+
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return _extract_json_from_text(content)
+    return content
 
 
 def _validate_response(content: Any) -> Optional[Dict[str, Any]]:
@@ -424,17 +442,9 @@ def validate_tool_error(
         if not output:
             return None
 
-        # Parse JSON response
-        try:
-            response = json.loads(output)
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            content = _extract_json_from_text(output)
-            if content is None:
-                return None
+        content = _parse_cli_output(output)
+        if content is None:
+            return None
 
         # Validate response
         if not isinstance(content, dict):
@@ -589,17 +599,9 @@ def detect_contradictions(
         if not output:
             return []
 
-        # Parse JSON response
-        try:
-            response = json.loads(output)
-            if isinstance(response, dict) and "result" in response:
-                content = response["result"]
-            else:
-                content = response
-        except json.JSONDecodeError:
-            content = _extract_json_from_text(output)
-            if content is None:
-                return []
+        content = _parse_cli_output(output)
+        if content is None:
+            return []
 
         # Extract contradictions
         if not isinstance(content, dict):

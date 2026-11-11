@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The plugin's hooks stay quiet inside those calls.** The helper sets `CLAUDE_REFLECT_NESTED=1`; all four hook scripts return early when it is set, so classifier prompts (which contain `remember:`) are not captured back into the learnings queue, and reminders don't leak into the classifier's context. This also covers older Claude Code without `--safe-mode`, where plugin hooks still load.
 - 19 tests in `tests/test_nested_claude.py`, including one that fails if anything in `scripts/` runs `claude` or a subprocess outside `_run_claude`.
 
+### Fixed
+- **Semantic detection never used the model's answer.** `claude -p --output-format json` prints an envelope whose `result` is the model's reply *as a string* (often in a ```json fence). `semantic_analyze`, `validate_tool_error` and `detect_contradictions` treated that string as the answer, so they always returned `None` / `[]` and `/reflect` silently fell back to regex detection. One `_parse_cli_output` helper now unwraps the envelope, parses the reply (fenced or not), and treats `is_error: true` as no answer. The existing tests mocked bare JSON on stdout, which is why this went unnoticed; 10 tests in `tests/test_cli_output_parsing.py` use the real envelope. Checked against Claude Code 2.1.322.
+- Note: with this fixed, `/reflect` makes real `claude -p` calls again (one per queued item, on `sonnet` by default).
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs
