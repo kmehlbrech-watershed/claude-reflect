@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 - 17 tests in `tests/test_private_storage.py`. They point both `HOME` and `USERPROFILE` at a temporary directory (Windows' `Path.home()` reads `USERPROFILE`), so a run can never write to or prune the real `~/.claude`.
 
+### Changed
+- **AGENTS.md sync is opt-in.** `/reflect` used to write to `./AGENTS.md` whenever the file existed, which in most repos means a committed, team-owned file. It now only does so with `--agents-md` (or `CLAUDE_REFLECT_AGENTS_MD=true`), and never creates the file. When AGENTS.md exists but sync is off, the summary says so.
+- **Only project learnings go to AGENTS.md.** Learnings routed to `~/.claude/CLAUDE.md`, user rules, `CLAUDE.local.md`, auto memory or skill files are no longer copied there ("apply the SAME learnings" published personal rules to the team).
+- **AGENTS.md changes are shown before they are written.** They appear in the Step 6 summary and must be approved there.
+- **Existing AGENTS.md entries are kept.** The claude-reflect section used to be replaced wholesale on each run, dropping earlier and hand-edited entries; it is now merged, and a bullet is only changed or removed when the user approved that in the summary.
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs

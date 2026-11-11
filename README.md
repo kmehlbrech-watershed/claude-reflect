@@ -116,6 +116,7 @@ correction is captured twice. The Python plugin stays the choice for `/reflect -
 | `/reflect --scan-history` | Scan ALL past sessions for missed learnings |
 | `/reflect --dry-run` | Preview changes without applying |
 | `/reflect --targets` | Show detected config files (CLAUDE.md, AGENTS.md) |
+| `/reflect --agents-md` | Also sync project learnings into an existing `AGENTS.md` (off by default; `CLAUDE_REFLECT_AGENTS_MD=true` to always enable) |
 | `/reflect --review` | Show queue with confidence scores and decay status |
 | `/reflect --dedupe` | Find and consolidate similar entries in CLAUDE.md |
 | `/reflect --include-tool-errors` | Include tool execution errors in scan |
@@ -189,7 +190,7 @@ Approved learnings are synced to:
 - `./CLAUDE.md` (project-specific)
 - `./**/CLAUDE.md` (subdirectories - auto-discovered)
 - `./.claude/commands/*.md` (skill files - when correction relates to a skill)
-- `AGENTS.md` (if exists - works with Codex, Cursor, Aider, Jules, Zed, Factory)
+- `AGENTS.md` (opt-in with `--agents-md`, if it exists - works with Codex, Cursor, Aider, Jules, Zed, Factory). Only learnings routed to a shared project target are copied there, never global or personal ones, and existing entries in its claude-reflect section are kept.
 - Docs reachable from the above via `@filename` includes or markdown links (bounded depth, cycles handled, code blocks/external URLs skipped) — useful when CLAUDE.md delegates guidance to `standards.md`, `architecture.md`, etc.
 
 Run `/reflect --targets` to see which files will be updated.
