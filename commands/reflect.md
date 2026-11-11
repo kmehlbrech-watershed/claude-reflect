@@ -1,6 +1,6 @@
 ---
 description: Reflect on session corrections and update CLAUDE.md (with human review)
-allowed-tools: Read, Edit, Write, Glob, Bash, Grep, AskUserQuestion, TodoWrite
+allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_learnings.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_rejections.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_tool_errors.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clear_queue.py" *)
 ---
 
 ## Arguments

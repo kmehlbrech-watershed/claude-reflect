@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Not retroactive: backups already in `~/.claude/learnings-backups/` are not rewritten. The deprecated `scripts/legacy/` bash scripts do not redact.
 - Tests in `tests/test_redact.py` cover masked and untouched examples, idempotence, 1 MB inputs, the queue readers, the backup and both migrations.
 
+- **Commands no longer pre-approve shell or file writes.** `/reflect`, `/reflect-skills`, `/view-queue` and `/skip-reflect` listed bare `Bash` (and `/reflect`/`/reflect-skills` also `Write`/`Edit`) in `allowed-tools`, so any shell command or file write during a run went through without a prompt, while the run reads untrusted transcript text. They now pre-approve only `Read`/`Glob`/`Grep`/`AskUserQuestion`/`TodoWrite` and the bundled scripts by exact path, e.g. `Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *)`. Edits to CLAUDE.md and other files, and any other shell command, now show a normal permission prompt with the diff. (`allowed-tools` only pre-approves; nothing is blocked.)
+- `/skip-reflect`'s queue count no longer uses an inline `python3 -c`; `read_queue.py --count` prints it.
+- `tests/test_allowed_tools.py` checks that no command pre-approves bare `Bash`/`Write`/`Edit`, that Bash rules name bundled scripts only, and that every `!` context line is covered by a rule exactly as written (an uncovered `!` line aborts the whole command).
+
 ## [3.3.1] - 2026-10-02
 
 ### Docs

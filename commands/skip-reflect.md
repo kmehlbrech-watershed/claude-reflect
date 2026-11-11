@@ -1,10 +1,10 @@
 ---
 description: Discard queued learnings without processing
-allowed-tools: Bash
+allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/clear_queue.py" *)
 ---
 
 ## Context
-- Queue count: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" 2>/dev/null | python3 -c "import sys,json;print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0`
+- Queue count: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" --count 2>/dev/null || echo 0`
 
 ## Your Task
 
@@ -14,7 +14,7 @@ allowed-tools: Bash
 
 2. If queue has items:
    - Show: "You are about to discard [count] learning(s). These will be lost:"
-   - List each queued item briefly (type + first 50 chars of message)
+   - List each queued item briefly (type + first 50 chars of message), from `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py"`
    - Ask: "Are you sure? [y/n]"
 
 3. If user confirms (y/yes):

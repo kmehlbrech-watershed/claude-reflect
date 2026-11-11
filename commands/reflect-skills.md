@@ -1,6 +1,6 @@
 ---
 description: Discover skill candidates from repeating session patterns
-allowed-tools: Read, Write, Bash, Glob, Grep, AskUserQuestion, TodoWrite
+allowed-tools: Read, Glob, Grep, AskUserQuestion, TodoWrite, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/project_paths.py" *), Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_learnings.py" *)
 ---
 
 ## Arguments

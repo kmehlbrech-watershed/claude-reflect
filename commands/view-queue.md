@@ -1,6 +1,6 @@
 ---
 description: View the learnings queue without processing
-allowed-tools: Bash, Read
+allowed-tools: Read, Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/read_queue.py" *)
 ---
 
 ## Context
