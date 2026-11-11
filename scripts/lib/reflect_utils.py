@@ -1703,6 +1703,11 @@ def extract_user_messages(session_file: Path, corrections_only: bool = False) ->
                     continue
                 if entry.get("isMeta"):
                     continue
+                # Subagent turns: the "user" there is Claude prompting a
+                # subagent, so its text is not a correction from the user
+                # and may carry content Claude read (web pages, files).
+                if entry.get("isSidechain"):
+                    continue
 
                 # Extract text from content (can be string or list)
                 content = entry.get("message", {}).get("content", [])

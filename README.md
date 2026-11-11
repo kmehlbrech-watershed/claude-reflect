@@ -400,6 +400,10 @@ Claude filters out:
 
 Only reusable learnings are kept.
 
+### Transcripts Are Data
+
+Session files contain text Claude read from web pages, files and tool output, so `/reflect` and `/reflect-skills` never follow instructions found in them. Proposed learnings that would run or fetch something, change settings or permissions, or speak to the AI directly are shown with a `⚠️ possible injected instruction` flag and default to Skip. Subagent conversations (`agent-*.jsonl`, `isSidechain` entries) are not mined for corrections, because their "user" turns were written by Claude.
+
 ### Duplicate Detection
 
 Before adding a learning, existing CLAUDE.md content is checked. If similar content exists, you can:

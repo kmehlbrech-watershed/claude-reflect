@@ -44,12 +44,18 @@ def main() -> int:
     session_dir = get_claude_dir() / "projects" / folder
 
     sessions = []
+    subagents = []
     if session_dir.is_dir():
-        sessions = sorted(
+        newest_first = sorted(
             (str(p) for p in session_dir.glob("*.jsonl")),
             key=lambda p: os.path.getmtime(p),
             reverse=True,
         )
+        # agent-*.jsonl are subagent conversations: their "user" turns are
+        # prompts Claude wrote, not the user. Listed apart so callers mine
+        # them only for tool rejections, which do come from the user.
+        for path in newest_first:
+            (subagents if os.path.basename(path).startswith("agent-") else sessions).append(path)
 
     print(json.dumps({
         "project_dir": str(project),
@@ -57,6 +63,7 @@ def main() -> int:
         "session_dir": str(session_dir),
         "session_dir_exists": session_dir.is_dir(),
         "session_files": sessions,
+        "subagent_files": subagents,
         "queue_path": str(get_queue_path(project)),
         "memory_dir": str(get_auto_memory_path(project)),
     }, indent=2))
